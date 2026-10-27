@@ -2157,6 +2157,8 @@ export function App() {
           runDocumentCheck();
           return;
         case "check-update":
+          // 打开关于页再检查：检查要十几秒，必须让用户看见转圈和结果。
+          setHelpMode("about");
           void updater.check();
           return;
         case "check-fix-all": {
@@ -3108,7 +3110,11 @@ export function App() {
         onOpen={(file, offset) => void openSearchResult(file, offset)}
         onClose={() => setSearchOpen(false)}
       />
-      <HelpDialog mode={helpMode} onClose={() => setHelpMode(null)} />
+      <HelpDialog
+        mode={helpMode}
+        onClose={() => setHelpMode(null)}
+        update={desktop ? updater : undefined}
+      />
       <AiReview
         state={ai.panel}
         onAdopt={ai.adopt}

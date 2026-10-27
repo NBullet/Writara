@@ -282,7 +282,9 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
   nsis + portable 同时发布会各建一个 draft，资产被拆开。`latest.yml` 里的文件名是连字符版
   （`Writara-Setup-0.2.0.exe`）：`--publish always` 会自动改名，手动上传要按这个名字。
 - `src/updates/` + `components/UpdateBanner.tsx` — 更新状态与横幅（和文件错误共用 `.wr-banner`）；
-  菜单「帮助 → 检查更新…」同时进命令面板。Web 版没有 `window.writara.updates`，菜单项和横幅都不出现。
+  菜单「帮助 → 检查更新…」会先打开关于页再检查（GitHub 慢的时候要十几秒，必须让用户看见转圈和结果），
+  关于页底部的胶囊按钮是 Lucian #001 的移植，状态由 `useUpdater` 驱动。Web 版没有
+  `window.writara.updates`，菜单项、横幅和关于页按钮都不出现。
 - `src/components/HelpDialog.tsx` — 关于页（作者 / 邮箱 / GitHub / 版本）。版本号由 `vite.config.ts` 的
   `define` 从 `package.json` 注入成 `__WRITARA_VERSION__`，不要在组件里写死；改版本只改一处。
 - `electron/ipc-fs.ts` — 文件 IPC。**只信任**来自对话框、命令行参数、已授权工作区根目录的路径；

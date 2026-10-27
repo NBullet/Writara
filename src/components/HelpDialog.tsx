@@ -1,5 +1,7 @@
+// Lucian UX/UI Prompt #001 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#001
 import { Fragment, useEffect, useRef, useState } from "react";
 
+import type { UpdateStatus } from "../updates/types";
 import { CloseIcon, SearchIcon } from "./icons";
 
 const SHORTCUT_GROUPS: Array<{ title: string; items: Array<[string, string]> }> = [
@@ -63,9 +65,17 @@ const SHORTCUT_GROUPS: Array<{ title: string; items: Array<[string, string]> }> 
   },
 ];
 
+export interface UpdateControls {
+  status: UpdateStatus;
+  check: () => Promise<void> | void;
+  download: () => void;
+  install: () => void;
+}
+
 interface Props {
   mode: "about" | "shortcuts" | null;
   onClose: () => void;
+  update?: UpdateControls;
 }
 
 function Keys({ value }: { value: string }) {
@@ -90,10 +100,53 @@ function Keys({ value }: { value: string }) {
   );
 }
 
-export function HelpDialog({ mode, onClose }: Props) {
+export function HelpDialog({ mode, onClose, update }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
+  const [justChecked, setJustChecked] = useState(false);
+
+  // 检查成功后在胶囊上停留一会儿打勾，再回到「检查更新」。
+  useEffect(() => {
+    if (update?.status.state !== "none") {
+      setJustChecked(false);
+      return;
+    }
+    setJustChecked(true);
+    const timer = window.setTimeout(() => setJustChecked(false), 3600);
+    return () => window.clearTimeout(timer);
+  }, [update?.status.state]);
+
+  const status: UpdateStatus = update?.status ?? { state: "idle" };
+  const busy = status.state === "checking" || status.state === "downloading";
+  const checkState = busy ? "load" : justChecked ? "ok" : "idle";
+  const updateLabel =
+    status.state === "available"
+      ? `下载 v${status.version}`
+      : status.state === "downloaded"
+        ? "重启并安装"
+        : "检查更新";
+  const updateText =
+    status.state === "checking"
+      ? "正在检查更新…"
+      : status.state === "none"
+        ? "已是最新版本"
+        : status.state === "available"
+          ? `发现新版本 v${status.version}`
+          : status.state === "downloading"
+            ? `正在下载 v${status.version} · ${status.percent}%`
+            : status.state === "downloaded"
+              ? `v${status.version} 已下载，重启后安装`
+              : status.state === "error"
+                ? `检查失败：${status.message}`
+                : "检查是否有新版本";
+
+  const runUpdate = (): void => {
+    if (!update || busy) return;
+    if (status.state === "available") update.download();
+    else if (status.state === "downloaded") update.install();
+    else void update.check();
+  };
 
   useEffect(() => {
     const dialog = ref.current;
@@ -148,42 +201,78 @@ export function HelpDialog({ mode, onClose }: Props) {
 
         {mode === "about" ? (
           <div className="wr-about">
-            <span className="wr-about-mark" aria-hidden="true">
-              W
-            </span>
-            <h3>Writara｜文叙</h3>
-            <p className="wr-about-slogan">自然书写，即刻呈现。</p>
-            <p>
-              源码与渲染同层的 Markdown 编辑器：文件直接读写本地磁盘，打印与导出的排版和屏幕一致。
-            </p>
-            <p className="wr-about-tech">React · CodeMirror 6 · Lezer · KaTeX · Mermaid</p>
-            <dl className="wr-about-meta">
-              <div>
-                <dt>作者</dt>
-                <dd>NBullet</dd>
+            <div className="wr-about-main">
+              <div className="wr-about-brand">
+                <span className="wr-about-mark" aria-hidden="true">
+                  W
+                </span>
+                <div>
+                  <h3>Writara｜文叙</h3>
+                  <p className="wr-about-slogan">自然书写，即刻呈现。</p>
+                </div>
               </div>
-              <div>
-                <dt>邮箱</dt>
-                <dd>
-                  <a href="mailto:nbullet@126.com">nbullet@126.com</a>
-                </dd>
+              <p>
+                源码与渲染同层的 Markdown 编辑器：文件直接读写本地磁盘，打印与导出的排版和屏幕一致。
+              </p>
+              <ul className="wr-about-tech" aria-label="技术栈">
+                {["React", "CodeMirror 6", "Lezer", "KaTeX", "Mermaid"].map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+
+            <aside className="wr-about-card" aria-label="项目信息">
+              <div className="wr-about-row">
+                <span>作者</span>
+                <b>NBullet</b>
               </div>
-              <div>
-                <dt>代码</dt>
-                <dd>
-                  <a href="https://github.com/NBullet/Writara" target="_blank" rel="noreferrer">
-                    github.com/NBullet/Writara
-                  </a>
-                </dd>
+              <div className="wr-about-row">
+                <span>邮箱</span>
+                <a href="mailto:nbullet@126.com">nbullet@126.com</a>
               </div>
-              <div>
-                <dt>版本</dt>
-                <dd>{__WRITARA_VERSION__}</dd>
+              <div className="wr-about-row">
+                <span>代码</span>
+                <a href="https://github.com/NBullet/Writara" target="_blank" rel="noreferrer">
+                  github.com/NBullet/Writara
+                </a>
               </div>
-            </dl>
-            <button type="button" className="wr-button wr-button-primary" onClick={onClose}>
-              关闭
-            </button>
+              <div className="wr-about-row">
+                <span>版本</span>
+                <b>{__WRITARA_VERSION__}</b>
+              </div>
+            </aside>
+
+            <footer className="wr-about-foot">
+              <span className="wr-about-update-text" aria-live="polite">
+                {update ? updateText : "桌面端支持在线更新"}
+              </span>
+              {update ? (
+                <div className="lx-check" data-state={checkState}>
+                  <button
+                    type="button"
+                    className="lx-check-btn"
+                    aria-busy={busy}
+                    onClick={runUpdate}
+                  >
+                    <span className="lx-check-sheen" aria-hidden="true" />
+                    <span className="lx-check-txt">{updateLabel}</span>
+                    <span className="lx-check-spin" aria-hidden="true">
+                      <svg viewBox="0 0 30 30">
+                        <circle cx="15" cy="15" r="10" />
+                      </svg>
+                    </span>
+                    <span className="lx-check-done" aria-hidden="true">
+                      <b>
+                        <svg viewBox="0 0 16 16">
+                          <path d="M3.5 8.4l3 3 6-6.4" />
+                        </svg>
+                      </b>
+                      已是最新
+                    </span>
+                  </button>
+                </div>
+              ) : null}
+            </footer>
           </div>
         ) : (
           <>
