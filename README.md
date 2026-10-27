@@ -26,7 +26,8 @@ CodeMirror 6 自绘即时渲染，`**`、`#`、表格、公式这些标记默认
 
 到 [Releases](https://github.com/NBullet/Writara/releases) 下载 Windows 安装包。
 
-- **安装版**（NSIS）支持在线更新；`portable` 单文件版不支持。
+- **安装版**（NSIS）支持在线更新，发布在 Releases；`portable` 单文件版用 `npm run package` 本地构建，
+  不参与在线更新。
 - 当前安装包**未签名**，首次运行可能出现 SmartScreen 提示。
 - macOS / Linux 已配置构建目标，但尚未实际打包验证。
 
@@ -62,8 +63,11 @@ $env:GH_TOKEN = "<有 repo 权限的 token>"
 npm run release
 ```
 
-`electron-builder` 会构建 NSIS 安装包和便携版，生成 `latest.yml`，在 GitHub 上创建**草稿** release。
+`electron-builder` 会构建 NSIS 安装包，生成 `latest.yml`，在 GitHub 上创建**草稿** release。
 到网页上把草稿发布，`electron-updater` 才能看到新版本（它只认已发布的 release）。
+
+发布只跑 NSIS 一个目标（`--win nsis`）：便携版和安装包一起发布会各自创建一个 draft，
+资产会被拆到两个 release 里。便携版用 `npm run package` 在本地构建，不参与在线更新。
 
 - 版本号只改 `package.json` 一处；关于页通过构建时注入的 `__WRITARA_VERSION__` 读取。
 - 安装包未签名，因此 `electron-builder.yml` 里显式关掉了更新包的 Authenticode 校验；

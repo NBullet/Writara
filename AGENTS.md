@@ -278,7 +278,8 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
   `app-update.yml` 由 electron-builder 生成（`publish.owner = NBullet` / `repo = Writara`，
   `releaseType: draft`）。安装包未签名，所以 `win.verifyUpdateCodeSignature: false`；
   签名之后要删掉它，让更新校验发布者。发布用 `GH_TOKEN=... npm run release`，然后到 GitHub
-  把草稿 release **发布**（更新只认已发布的 release）。`latest.yml` 里的文件名是连字符版
+  把草稿 release **发布**（更新只认已发布的 release）。**只发布 NSIS 一个目标**（`--win nsis`）：
+  nsis + portable 同时发布会各建一个 draft，资产被拆开。`latest.yml` 里的文件名是连字符版
   （`Writara-Setup-0.2.0.exe`）：`--publish always` 会自动改名，手动上传要按这个名字。
 - `src/updates/` + `components/UpdateBanner.tsx` — 更新状态与横幅（和文件错误共用 `.wr-banner`）；
   菜单「帮助 → 检查更新…」同时进命令面板。Web 版没有 `window.writara.updates`，菜单项和横幅都不出现。
