@@ -15,7 +15,7 @@
     "build:main": "vite build --config vite.electron.config.ts",
     "build:electron": "npm run typecheck && npm run build:renderer && npm run build:main",
     "package": "npm run build:electron && electron-builder",
-    "release": "npm run build:electron && electron-builder --win nsis --publish always",
+    "release": "npm run build:electron && electron-builder --win nsis --publish never && node scripts/publish.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json",
     "templates:docx": "node scripts/make-docx-templates.mjs",
