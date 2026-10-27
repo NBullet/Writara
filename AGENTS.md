@@ -161,6 +161,13 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
   不要再引入 `window.confirm`：Electron 里会弹原生模态并阻塞渲染。
 - `src/components/Toaster.tsx` / `toast.ts` — 固定右下角的单槽提示层；成功 4s、错误常驻、
   删除撤销 8s。新提示顶掉旧提示，不做通知中心。
+- `src/components/BusyOverlay.tsx` + `App` 的 `withBusy` — 长操作提示（打开大文件、扫描文件夹、
+  跨文件搜索、项目导出、文档体检、编码转换）。`withBusy` 必须先 yield 一帧再执行，否则同步的
+  `setDoc` / `runChecks` 会把提示条一起卡住，用户还是看不到。工作区扫描没有走 `withBusy`，
+  由 `workspace.busy` 合成同一条提示。
+  **已知上限**：主进程 `decodeBuffer` 仍是同步解码，超大文件（尤其 GBK）在解码期间窗口仍可能
+  被系统标成无响应；彻底解决要把解码搬进 worker。CodeMirror 解析超大文档同样会阻塞渲染进程，
+  提示条能显示，但界面在那几秒里确实不能操作。
 - `src/ai/agent-run.ts` — **AI 的唯一执行入口**：`selectedAgent` / `runAgentTask` / `agentContext`。
   AI 只走本机 coding-agent CLI（OpenCode / Claude Code）：模型、端点、Key 都由 agent 自己的配置负责，
   Writara 不保存任何凭据。`settings.aiAgentId` 形如 `cli:opencode`，`aiAgentModels` 按 agent 存模型。

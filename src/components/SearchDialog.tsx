@@ -25,13 +25,14 @@ export async function searchFiles(
   query: string,
   read: (file: WorkspaceFile) => Promise<string>,
   onResult?: (results: SearchResult[]) => void,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<SearchResult[]> {
   const needle = query.trim().toLowerCase();
   if (!needle) return [];
 
   const results: SearchResult[] = [];
 
-  for (const file of files) {
+  for (const [fileIndex, file] of files.entries()) {
     if (results.length >= MAX_RESULTS) break;
 
     let text: string;
@@ -43,23 +44,24 @@ export async function searchFiles(
     if (text.length > 2_000_000) continue;
 
     const haystack = text.toLowerCase();
-    let index = haystack.indexOf(needle);
+    let match = haystack.indexOf(needle);
 
-    while (index >= 0 && results.length < MAX_RESULTS) {
-      const lineStart = text.lastIndexOf("\n", index) + 1;
-      const lineEnd = text.indexOf("\n", index);
+    while (match >= 0 && results.length < MAX_RESULTS) {
+      const lineStart = text.lastIndexOf("\n", match) + 1;
+      const lineEnd = text.indexOf("\n", match);
       const lineText = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
       const line = text.slice(0, lineStart).split("\n").length;
       results.push({
         file,
-        offset: index,
+        offset: match,
         line,
         preview: lineText.trim().slice(0, 140),
       });
-      index = haystack.indexOf(needle, index + needle.length);
+      match = haystack.indexOf(needle, match + needle.length);
     }
 
     onResult?.([...results]);
+    onProgress?.(fileIndex + 1, files.length);
   }
 
   return results;
@@ -69,6 +71,7 @@ export function SearchDialog({ open, files, read, onOpen, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [searched, setSearched] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -77,6 +80,7 @@ export function SearchDialog({ open, files, read, onOpen, onClose }: Props) {
     setQuery("");
     setResults([]);
     setSearched(false);
+    setProgress(null);
     const frame = requestAnimationFrame(() => inputRef.current?.focus());
     return () => cancelAnimationFrame(frame);
   }, [open]);
@@ -86,12 +90,16 @@ export function SearchDialog({ open, files, read, onOpen, onClose }: Props) {
   const run = async () => {
     if (busy) return;
     setBusy(true);
+    setProgress({ done: 0, total: files.length });
     try {
-      const found = await searchFiles(files, query, read, setResults);
+      const found = await searchFiles(files, query, read, setResults, (done, total) =>
+        setProgress({ done, total }),
+      );
       setResults(found);
       setSearched(true);
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
@@ -125,14 +133,33 @@ export function SearchDialog({ open, files, read, onOpen, onClose }: Props) {
             }}
           />
           <button type="submit" className="wr-button" disabled={busy || !query.trim()}>
-            {busy ? "搜索中…" : "搜索"}
+            {busy ? (progress ? `搜索 ${progress.done}/${progress.total}` : "搜索中…") : "搜索"}
           </button>
         </form>
+
+        {busy ? (
+          <div
+            className="wr-search-progress"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={progress?.total ?? files.length}
+            aria-valuenow={progress?.done ?? 0}
+          >
+            <i
+              style={{
+                width: `${progress && progress.total ? (progress.done / progress.total) * 100 : 0}%`,
+              }}
+            />
+          </div>
+        ) : null}
 
         {results.length === 0 ? (
           <div className="wr-palette-empty">
             {busy ? (
-              <p>正在搜索…</p>
+              <p>
+                正在搜索…
+                {progress ? ` ${progress.done}/${progress.total}` : ""}
+              </p>
             ) : files.length === 0 ? (
               <>
                 <p>这个文件夹里还没有可搜索的文件</p>

@@ -517,6 +517,54 @@ body {
   color: var(--wr-muted);
 }
 
+/* 长操作提示：固定左下角，不挡点击、不挤动正文。 */
+.wr-busy {
+  position: fixed;
+  bottom: 44px;
+  left: 16px;
+  z-index: var(--wr-z-float);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 8px 13px;
+  border: 1px solid var(--wr-border);
+  border-radius: 999px;
+  background: var(--wr-surface);
+  box-shadow: var(--wr-shadow-pop);
+  color: var(--wr-text);
+  font-size: 12.5px;
+  animation: wr-banner-in 140ms ease;
+}
+
+.wr-busy-spinner {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  border: 2px solid color-mix(in srgb, var(--wr-accent) 25%, transparent);
+  border-top-color: var(--wr-accent);
+  border-radius: 50%;
+  animation: wr-busy-spin 0.75s linear infinite;
+}
+
+.wr-busy-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes wr-busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wr-busy-spinner {
+    animation: none;
+  }
+}
+
 /* 提示层：固定右下角，一次一条，不参与正文布局。 */
 .wr-toast-stack {
   position: fixed;
@@ -877,6 +925,19 @@ body {
   gap: 8px;
   padding: 10px;
   border-bottom: 1px solid var(--wr-border);
+}
+
+.wr-search-progress {
+  height: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--wr-text) 8%, transparent);
+}
+
+.wr-search-progress i {
+  display: block;
+  height: 100%;
+  background: var(--wr-accent);
+  transition: width 120ms linear;
 }
 
 .wr-search-bar .wr-palette-input {

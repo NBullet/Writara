@@ -31,6 +31,7 @@ import {
 import { PromptDialog, type PromptRequest } from "./components/PromptDialog";
 import { Sidebar, type SidebarMode } from "./components/Sidebar";
 import { Toaster } from "./components/Toaster";
+import { BusyOverlay } from "./components/BusyOverlay";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { toast } from "./components/toast";
 import { useUpdater } from "./updates/useUpdater";
@@ -211,6 +212,32 @@ export function App() {
   const [externalChange, setExternalChange] = useState<string | null>(null);
   const desktop = isDesktop();
   const updater = useUpdater();
+
+  /** 长操作提示：同一时间只显示最上层的消息，计数归零才收起。 */
+  const [busy, setBusy] = useState<string | null>(null);
+  const busyCount = useRef(0);
+  const yieldFrame = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        // 先让提示条画出来，再跑可能卡住渲染进程的活。
+        window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+      }),
+    [],
+  );
+  const withBusy = useCallback(
+    async <T,>(message: string, task: () => Promise<T> | T): Promise<T> => {
+      busyCount.current += 1;
+      setBusy(message);
+      await yieldFrame();
+      try {
+        return await task();
+      } finally {
+        busyCount.current -= 1;
+        if (busyCount.current === 0) setBusy(null);
+      }
+    },
+    [yieldFrame],
+  );
 
   /** 事件订阅里要拿到最新的 doc，但不想每次渲染都重新订阅。 */
   const docRef = useRef(doc);
@@ -449,16 +476,20 @@ export function App() {
       const view = editorRef.current?.getView();
       if (!view) return;
       const files = workspace.files.map((file) => file.path);
-      const issues = runChecks(view.state.doc.toString(), {
-        profile,
-        docPath: doc.path,
-        files: doc.path ? files : undefined,
+      const text = view.state.doc.toString();
+      void withBusy("正在体检文档…", async () => {
+        await yieldFrame();
+        const issues = runChecks(text, {
+          profile,
+          docPath: doc.path,
+          files: doc.path ? files : undefined,
+        });
+        setCheckProfile(profile);
+        setCheckReport({ docName: doc.name || "未命名", profile, issues });
+        if (!issues.length) toast.success("体检通过：没有发现问题");
       });
-      setCheckProfile(profile);
-      setCheckReport({ docName: doc.name || "未命名", profile, issues });
-      if (!issues.length) toast.success("体检通过：没有发现问题");
     },
-    [checkProfile, doc.name, doc.path, workspace.files],
+    [checkProfile, doc.name, doc.path, withBusy, workspace.files, yieldFrame],
   );
 
   const jumpToIssue = useCallback((issue: CheckIssue) => {
@@ -531,29 +562,31 @@ export function App() {
   const [proposals, setProposals] = useState<ProposalView[] | null>(null);
 
   const reloadProposals = useCallback(async () => {
-    const files = proposalFiles(workspace.configFiles);
-    const views: ProposalView[] = [];
-    for (const file of files) {
-      try {
-        const content = await workspace.read(file);
-        const parsed = parseProposal(file.path, content.text);
-        if (!parsed) continue;
-        const targetFile = workspace.files.find((entry) => entry.path === parsed.target);
-        let targetText: string | null = null;
-        if (targetFile) {
-          try {
-            targetText = (await workspace.read(targetFile)).text;
-          } catch {
-            targetText = null;
+    await withBusy("正在读取提案…", async () => {
+      const files = proposalFiles(workspace.configFiles);
+      const views: ProposalView[] = [];
+      for (const file of files) {
+        try {
+          const content = await workspace.read(file);
+          const parsed = parseProposal(file.path, content.text);
+          if (!parsed) continue;
+          const targetFile = workspace.files.find((entry) => entry.path === parsed.target);
+          let targetText: string | null = null;
+          if (targetFile) {
+            try {
+              targetText = (await workspace.read(targetFile)).text;
+            } catch {
+              targetText = null;
+            }
           }
+          views.push({ ...parsed, targetText, isCurrent: doc.path === parsed.target });
+        } catch {
+          // 单个提案读不出来就跳过，不影响其他提案
         }
-        views.push({ ...parsed, targetText, isCurrent: doc.path === parsed.target });
-      } catch {
-        // 单个提案读不出来就跳过，不影响其他提案
       }
-    }
-    setProposals(views);
-  }, [doc.path, workspace]);
+      setProposals(views);
+    });
+  }, [doc.path, withBusy, workspace]);
 
   const acceptProposal = useCallback(
     async (view: ProposalView) => {
@@ -695,17 +728,21 @@ export function App() {
       if (!(await ensureSaved())) return;
       try {
         setFileError(null);
-        const content = await workspace.read(file);
-        doc.openExternal(content.text, file.name, file.ref, file.path, {
-          encoding: content.encoding,
-          bom: content.bom,
+        await withBusy(`正在打开「${file.name}」…`, async () => {
+          const content = await workspace.read(file);
+          doc.openExternal(content.text, file.name, file.ref, file.path, {
+            encoding: content.encoding,
+            bom: content.bom,
+          });
+          // 编辑器在 effect 里才替换文档并重新解析；多等一帧再收起提示。
+          await yieldFrame();
         });
         setSidebarVisible(true);
       } catch {
         setFileError(`无法读取 ${file.path}`);
       }
     },
-    [doc, ensureSaved, workspace],
+    [doc, ensureSaved, workspace, withBusy, yieldFrame],
   );
 
   /**
@@ -1042,75 +1079,81 @@ export function App() {
 
   /** 合并导出：桌面端直接出 PDF；浏览器没有 PDF 通道时下载合并后的 HTML。 */
   const exportProjectSingle = useCallback(async () => {
-    try {
-      setFileError(null);
-      const prepared = await renderCurrentProject();
-      if (!prepared) return;
-      const { rendered, title, style } = prepared;
+    await withBusy("正在合并章节并导出…", async () => {
+      try {
+        setFileError(null);
+        const prepared = await renderCurrentProject();
+        if (!prepared) return;
+        const { rendered, title, style } = prepared;
 
-      const path = await exportHtmlAsPdf(rendered.html, `${title}.pdf`, {
-        title,
-        style,
-        pageNumbers: settings.pdfPageNumbers,
-        author: settings.pdfAuthor,
-      });
-      if (path) {
-        setExportedPath(path);
-        if (settings.openExportFolder) void window.writara?.shell.showItemInFolder(path);
-        toast.success(`已导出「${title}」`);
-        return;
+        const path = await exportHtmlAsPdf(rendered.html, `${title}.pdf`, {
+          title,
+          style,
+          pageNumbers: settings.pdfPageNumbers,
+          author: settings.pdfAuthor,
+        });
+        if (path) {
+          setExportedPath(path);
+          if (settings.openExportFolder) void window.writara?.shell.showItemInFolder(path);
+          toast.success(`已导出「${title}」`);
+          return;
+        }
+
+        downloadHtmlText(rendered.html, `${title}.html`);
+        toast.info("浏览器里没有 PDF 通道，已下载合并后的 HTML");
+      } catch (cause) {
+        toast.error(describeFileError(cause));
       }
-
-      downloadHtmlText(rendered.html, `${title}.html`);
-      toast.info("浏览器里没有 PDF 通道，已下载合并后的 HTML");
-    } catch (cause) {
-      toast.error(describeFileError(cause));
-    }
+    });
   }, [
     renderCurrentProject,
     settings.openExportFolder,
     settings.pdfAuthor,
     settings.pdfPageNumbers,
+    withBusy,
   ]);
 
   /** 目录式导出：每章一个 HTML，外加目录索引页。 */
   const exportProjectBundle = useCallback(async () => {
-    try {
-      setFileError(null);
-      const prepared = await renderCurrentProject();
-      if (!prepared) return;
-      const folder = await platform().chooseFolder({ mode: "readwrite", id: "writara-export" });
-      if (!folder) return;
+    await withBusy("正在合并章节…", async () => {
+      try {
+        setFileError(null);
+        const prepared = await renderCurrentProject();
+        if (!prepared) return;
+        const folder = await platform().chooseFolder({ mode: "readwrite", id: "writara-export" });
+        if (!folder) return;
 
-      const files = prepared.rendered.chapters.map((chapter, index) => ({
-        title: chapter.title,
-        fileName: chapterFileName(index, chapter.title),
-      }));
-      for (const [index, chapter] of prepared.rendered.chapters.entries()) {
+        const files = prepared.rendered.chapters.map((chapter, index) => ({
+          title: chapter.title,
+          fileName: chapterFileName(index, chapter.title),
+        }));
+        for (const [index, chapter] of prepared.rendered.chapters.entries()) {
+          setBusy(`正在导出第 ${index + 1}/${files.length} 章…`);
+          await platform().writeRootFile(
+            folder,
+            files[index]!.fileName,
+            chapterDocumentHtml(chapter, prepared.style, prepared.rendered.fonts),
+          );
+        }
         await platform().writeRootFile(
           folder,
-          files[index]!.fileName,
-          chapterDocumentHtml(chapter, prepared.style, prepared.rendered.fonts),
+          "index.html",
+          bundleIndexHtml(prepared.title, files, prepared.style, prepared.rendered.fonts),
         );
-      }
-      await platform().writeRootFile(
-        folder,
-        "index.html",
-        bundleIndexHtml(prepared.title, files, prepared.style, prepared.rendered.fonts),
-      );
 
-      toast.success(`已导出 ${files.length} 章到所选文件夹`);
-      const dir = absolutePathOf(folder.native);
-      if (dir) {
-        const separator = dir.includes("\\") ? "\\" : "/";
-        void window.writara?.shell.showItemInFolder(
-          `${dir.replace(/[\\/]+$/, "")}${separator}index.html`,
-        );
+        toast.success(`已导出 ${files.length} 章到所选文件夹`);
+        const dir = absolutePathOf(folder.native);
+        if (dir) {
+          const separator = dir.includes("\\") ? "\\" : "/";
+          void window.writara?.shell.showItemInFolder(
+            `${dir.replace(/[\\/]+$/, "")}${separator}index.html`,
+          );
+        }
+      } catch (cause) {
+        toast.error(describeFileError(cause));
       }
-    } catch (cause) {
-      toast.error(describeFileError(cause));
-    }
-  }, [absolutePathOf, renderCurrentProject]);
+    });
+  }, [absolutePathOf, renderCurrentProject, withBusy]);
 
   // ---- 项目 AI：多文件任务 → 逐文件 diff → 勾选写回 ----
 
@@ -1406,17 +1449,20 @@ export function App() {
       if (!(await ensureSaved())) return;
       try {
         setFileError(null);
-        const content = await workspace.read(file);
-        pendingJump.current = offset;
-        doc.openExternal(content.text, file.name, file.ref, file.path, {
-          encoding: content.encoding,
-          bom: content.bom,
+        await withBusy(`正在打开「${file.name}」…`, async () => {
+          const content = await workspace.read(file);
+          pendingJump.current = offset;
+          doc.openExternal(content.text, file.name, file.ref, file.path, {
+            encoding: content.encoding,
+            bom: content.bom,
+          });
+          await yieldFrame();
         });
       } catch {
         setFileError(`无法读取 ${file.path}`);
       }
     },
-    [doc, ensureSaved, workspace],
+    [doc, ensureSaved, workspace, withBusy, yieldFrame],
   );
 
   const handleDrop = useCallback(
@@ -1427,27 +1473,33 @@ export function App() {
       event.preventDefault();
       if (!(await ensureSaved())) return;
       try {
-        doc.openExternal(await markdown.text(), markdown.name, null);
+        await withBusy(`正在打开「${markdown.name}」…`, async () => {
+          doc.openExternal(await markdown.text(), markdown.name, null);
+          await yieldFrame();
+        });
       } catch {
         setFileError(`无法读取 ${markdown.name}`);
       }
     },
-    [doc, ensureSaved],
+    [doc, ensureSaved, withBusy, yieldFrame],
   );
 
   /** 从磁盘重新载入当前文件（外部修改后用户选择「重新加载」）。 */
   const reloadFromDisk = useCallback(async (target: string) => {
     try {
-      const file = await platform().openPath?.(target);
-      if (!file) {
-        setFileError("文件已被移动或删除");
-        return;
-      }
-      docRef.current.openExternal(file.text, file.name, file.ref, docRef.current.path, file.format);
+      await withBusy("正在重新载入…", async () => {
+        const file = await platform().openPath?.(target);
+        if (!file) {
+          setFileError("文件已被移动或删除");
+          return;
+        }
+        docRef.current.openExternal(file.text, file.name, file.ref, docRef.current.path, file.format);
+        await yieldFrame();
+      });
     } catch (cause) {
       setFileError(describeFileError(cause));
     }
-  }, []);
+  }, [withBusy, yieldFrame]);
 
   const openRecent = useCallback(
     async (entry: RecentFile) => {
@@ -1464,16 +1516,19 @@ export function App() {
           setFileError(`没有读取 ${entry.name} 的权限`);
           return;
         }
-        const text = await platform().read(entry.ref);
-        if (text === null) {
-          setFileError(`无法打开 ${entry.name}，文件可能已被移动或删除`);
-          toast.error(`${entry.name} 已不在原位置，已从最近列表移除`);
-          void forgetRecent(entry.ref);
-          return;
-        }
-        doc.openExternal(text.text, entry.name, entry.ref, null, {
-          encoding: text.encoding,
-          bom: text.bom,
+        await withBusy(`正在打开「${entry.name}」…`, async () => {
+          const text = await platform().read(entry.ref);
+          if (text === null) {
+            setFileError(`无法打开 ${entry.name}，文件可能已被移动或删除`);
+            toast.error(`${entry.name} 已不在原位置，已从最近列表移除`);
+            void forgetRecent(entry.ref);
+            return;
+          }
+          doc.openExternal(text.text, entry.name, entry.ref, null, {
+            encoding: text.encoding,
+            bom: text.bom,
+          });
+          await yieldFrame();
         });
       } catch {
         setFileError(`无法打开 ${entry.name}，文件可能已被移动或删除`);
@@ -1481,7 +1536,7 @@ export function App() {
         void forgetRecent(entry.ref);
       }
     },
-    [doc, ensureSaved],
+    [doc, ensureSaved, withBusy, yieldFrame],
   );
 
   /**
@@ -1503,19 +1558,23 @@ export function App() {
       if (!(await ensureSaved())) return;
       try {
         setFileError(null);
-        await platform().restoreAccess?.({ name: "", native: target });
-        const file = await platform().openPath?.(target);
-        if (!file) {
-          setFileError(`无法打开 ${target}，文件可能已被移动或删除`);
-          toast.error("文件可能已被移动或删除");
-          return;
-        }
-        doc.openExternal(file.text, file.name, file.ref, null, file.format);
+        const name = target.split(/[\\/]/).pop() || target;
+        await withBusy(`正在打开「${name}」…`, async () => {
+          await platform().restoreAccess?.({ name: "", native: target });
+          const file = await platform().openPath?.(target);
+          if (!file) {
+            setFileError(`无法打开 ${target}，文件可能已被移动或删除`);
+            toast.error("文件可能已被移动或删除");
+            return;
+          }
+          doc.openExternal(file.text, file.name, file.ref, null, file.format);
+          await yieldFrame();
+        });
       } catch (cause) {
         setFileError(describeFileError(cause));
       }
     },
-    [doc, ensureSaved, openRecent, recent],
+    [doc, ensureSaved, openRecent, recent, withBusy, yieldFrame],
   );
 
   /** 同上，最近文件夹：菜单 id 里带路径，避免多窗口下标错位。 */
@@ -2180,7 +2239,7 @@ export function App() {
         case "open":
           void (async () => {
             if (!(await ensureSaved())) return;
-            await doc.open();
+            await withBusy("正在打开文件…", () => doc.open());
           })();
           return;
         case "open-folder":
@@ -2209,21 +2268,25 @@ export function App() {
           return;
         }
         case "convert-utf8":
-          void doc.convertToUtf8();
+          void withBusy("正在转换编码…", () => doc.convertToUtf8());
           return;
         case "export-html":
-          void downloadHtml(liveText(), doc.name, undefined, settings.exportStyle);
+          void withBusy("正在生成 HTML…", () =>
+            downloadHtml(liveText(), doc.name, undefined, settings.exportStyle),
+          );
           return;
         case "export-pdf":
           void (async () => {
             try {
               setFileError(null);
-              const path = await exportPdf(liveText(), doc.name, {
-                pageNumbers: settings.pdfPageNumbers,
-                pageRanges: settings.pdfPageRanges || undefined,
-                style: settings.exportStyle,
-                author: settings.pdfAuthor,
-              });
+              const path = await withBusy("正在生成 PDF…", () =>
+                exportPdf(liveText(), doc.name, {
+                  pageNumbers: settings.pdfPageNumbers,
+                  pageRanges: settings.pdfPageRanges || undefined,
+                  style: settings.exportStyle,
+                  author: settings.pdfAuthor,
+                }),
+              );
               if (path) {
                 setExportedPath(path);
                 if (settings.openExportFolder) {
@@ -2236,7 +2299,7 @@ export function App() {
           })();
           return;
         case "export-png":
-          void exportPng(liveText(), doc.name);
+          void withBusy("正在生成 PNG…", () => exportPng(liveText(), doc.name));
           return;
         case "export-project-single":
           void exportProjectSingle();
@@ -2254,15 +2317,19 @@ export function App() {
           void (async () => {
             try {
               setFileError(null);
-              const path = await exportWithPandoc(liveText(), doc.name, format, {
-                pandocPath: settings.pandocPath,
-                resourceDir: native ? dirnameOf(native) : undefined,
-                template: settings.docxTemplate,
-                customTemplate: settings.docxTemplatePath,
-                toc: settings.docxToc,
-                numberSections: settings.docxNumberSections,
-                pageNumbers: settings.docxPageNumbers,
-              });
+              const path = await withBusy(
+                format === "docx" ? "正在导出 Word…" : "正在导出 ePub…",
+                () =>
+                  exportWithPandoc(liveText(), doc.name, format, {
+                    pandocPath: settings.pandocPath,
+                    resourceDir: native ? dirnameOf(native) : undefined,
+                    template: settings.docxTemplate,
+                    customTemplate: settings.docxTemplatePath,
+                    toc: settings.docxToc,
+                    numberSections: settings.docxNumberSections,
+                    pageNumbers: settings.docxPageNumbers,
+                  }),
+              );
               if (path) {
                 setExportedPath(path);
                 if (settings.openExportFolder) {
@@ -2280,18 +2347,20 @@ export function App() {
             void (async () => {
               try {
                 setFileError(null);
-                await previewPdf(liveText(), doc.name, {
-                  pageNumbers: settings.pdfPageNumbers,
-                  pageRanges: settings.pdfPageRanges || undefined,
-                  style: settings.exportStyle,
-                  author: settings.pdfAuthor,
-                });
+                await withBusy("正在生成打印预览…", () =>
+                  previewPdf(liveText(), doc.name, {
+                    pageNumbers: settings.pdfPageNumbers,
+                    pageRanges: settings.pdfPageRanges || undefined,
+                    style: settings.exportStyle,
+                    author: settings.pdfAuthor,
+                  }),
+                );
               } catch (cause) {
                 setFileError(describeFileError(cause));
               }
             })();
           } else {
-            void printMarkdown(liveText());
+            void withBusy("正在准备打印…", () => printMarkdown(liveText()));
           }
           return;
         case "settings":
@@ -2513,6 +2582,7 @@ export function App() {
       runDocumentCheck,
       settings,
       updater.check,
+      withBusy,
       workspace,
       zoom,
     ],
@@ -2617,12 +2687,16 @@ export function App() {
       shellOpened.current = true;
       void (async () => {
         try {
-          const file = await platform().openPath?.(target);
-          if (!file) {
-            setFileError(`无法打开 ${target}`);
-            return;
-          }
-          docRef.current.openExternal(file.text, file.name, file.ref, null, file.format);
+          const name = target.split(/[\\/]/).pop() || target;
+          await withBusy(`正在打开「${name}」…`, async () => {
+            const file = await platform().openPath?.(target);
+            if (!file) {
+              setFileError(`无法打开 ${target}`);
+              return;
+            }
+            docRef.current.openExternal(file.text, file.name, file.ref, null, file.format);
+            await yieldFrame();
+          });
         } catch (cause) {
           setFileError(describeFileError(cause));
         }
@@ -2630,7 +2704,7 @@ export function App() {
     });
     window.writara?.shellReady();
     return unsubscribe;
-  }, [desktop]);
+  }, [desktop, withBusy, yieldFrame]);
 
   // 主进程只在文档脏时发这个事件；确认后它才真的关窗口。
   useEffect(() => {
@@ -2764,6 +2838,9 @@ export function App() {
 
   const savedLabel = doc.saving ? "保存中…" : doc.dirty ? "未保存" : "已保存";
   const banner = doc.error ?? fileError ?? workspace.error ?? doc.notice;
+  // 手动操作优先；没有时用工作区扫描状态（打开/刷新文件夹都会走这里）。
+  const busyMessage =
+    busy ?? (workspace.busy ? `正在扫描${workspace.name ? `「${workspace.name}」` : "文件夹"}…` : null);
   const bannerIsError = Boolean(doc.error ?? fileError ?? workspace.error);
 
   // 导出完成用提示层：不挤动正文，也不常驻。
@@ -3152,6 +3229,7 @@ export function App() {
       />
       <ConfirmDialog request={confirmRequest} onSettle={settleConfirm} />
       <Toaster />
+      <BusyOverlay message={busyMessage} />
       <PromptDialog
         request={promptState}
         onSubmit={(value) => settlePrompt(value)}
