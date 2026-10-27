@@ -1,0 +1,78 @@
+/* 内置主题：只覆盖变量，编辑器与外壳同时生效。 */
+
+:root[data-style="github"] {
+  --wr-bg: #ffffff;
+  --wr-surface: #f6f8fa;
+  --wr-text: #24292f;
+  --wr-muted: #57606a;
+  --wr-border: #d0d7de;
+  --wr-accent: #0969da;
+  --wr-link: #0969da;
+  --wr-selection: #0969da33;
+  --wr-code-bg: #f6f8fa;
+  --wr-font-prose: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --wr-font-heading: var(--wr-font-prose);
+  --wr-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+}
+
+:root[data-style="newsprint"] {
+  --wr-bg: #fbfaf6;
+  --wr-surface: #f4f1ea;  --wr-text: #1c1b18;
+  --wr-muted: #6f6a5f;
+  --wr-border: #ddd8cb;
+  --wr-accent: #8b1e1e;
+  --wr-link: #8b1e1e;
+  --wr-selection: #8b1e1e26;
+  --wr-code-bg: #efebe1;
+  --wr-font-prose: "Iowan Old Style", "Source Han Serif SC", "Noto Serif SC", "Songti SC", Georgia, serif;
+  --wr-font-heading: var(--wr-font-prose);
+}
+
+:root[data-style="night"] {
+  color-scheme: dark;
+  --wr-bg: #1e1e1e;
+  --wr-surface: #252526;  --wr-text: #d4d4d4;
+  --wr-muted: #8d8d8d;
+  --wr-border: #3c3c3c;
+  --wr-accent: #4ec9b0;
+  --wr-link: #569cd6;
+  --wr-selection: #4ec9b033;
+  --wr-code-bg: #2d2d2d;
+  /* 深色主题下的警示红（浅色默认 #c0392b 不适合深色底） */
+  --wr-bad: #e58883;
+  --wr-font-prose: "Cascadia Code", "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  --wr-font-heading: var(--wr-font-prose);
+}
+
+:root[data-style="pixyll"] {
+  --wr-bg: #ffffff;
+  --wr-surface: #fafafa;
+  --wr-text: #333333;
+  --wr-muted: #777777;
+  --wr-border: #e5e5e5;
+  --wr-accent: #0076df;
+  --wr-link: #0076df;
+  --wr-selection: #0076df26;
+  --wr-code-bg: #f3f3f3;
+  --wr-font-prose: "Iowan Old Style", "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
+  --wr-font-heading: var(--wr-font-prose);
+  --wr-font-ui: "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+:root[data-style="whitey"] {
+  --wr-bg: #ffffff;
+  --wr-surface: #ffffff;
+  --wr-text: #000000;
+  --wr-muted: #808080;
+  --wr-border: #eeeeee;
+  --wr-accent: #000000;
+  --wr-link: #000000;
+  --wr-selection: #0000001a;
+  --wr-code-bg: #f7f7f7;
+  --wr-font-prose: "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --wr-font-heading: var(--wr-font-prose);
+  --wr-font-ui: "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif;
+}

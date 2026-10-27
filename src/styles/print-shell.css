@@ -1,0 +1,109 @@
+/* 打印宿主：屏幕上不占位，@media print 时接管整页 */
+
+.wr-print-host {
+  display: none;
+}
+
+/* 打印前测量高度时临时铺开（屏幕外，不闪烁） */
+.wr-print-host.wr-measure {
+  display: block !important;
+  position: fixed;
+  top: 0;
+  left: -20000px;
+  width: 174mm; /* 210 - 18*2 */
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 导出 PNG 时按 A4 纸铺开，截图后再隐藏 */
+.wr-print-host.wr-png {
+  display: block !important;
+  position: fixed;
+  top: 0;
+  left: -20000px;
+  width: 210mm;
+  padding: 20mm 18mm;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+@media print {
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  body > #root {
+    display: none !important;
+  }
+
+  .wr-print-host {
+    display: block !important;
+  }
+}
+
+/* 屏幕上的 A4 预览（?print=1） */
+
+.wr-print-preview {
+  min-height: 100%;
+  padding: 28px 16px 48px;
+  /* 浅色主题偏暖、深色主题偏亮，同一套公式适配两边 */
+  background: color-mix(in srgb, var(--wr-bg) 86%, var(--wr-text));
+}
+
+.wr-print-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 210mm;
+  max-width: 100%;
+  margin: 0 auto 14px;
+  color: var(--wr-muted, #6b6459);
+  font-family: var(--wr-font-ui, system-ui, sans-serif);
+  font-size: 13px;
+}
+
+.wr-print-preview-bar .wr-button {
+  color: var(--wr-text, #26221d);
+  border-color: var(--wr-border, #cfc8ba);
+  background: var(--wr-bg, #fff);
+}
+
+.wr-sheet {
+  width: 210mm;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 20mm 18mm;
+  box-sizing: border-box;
+  background: var(--wr-bg, #fff);
+  box-shadow: 0 2px 24px rgba(0, 0, 0, 0.12);
+}
+
+.wr-preview-loading {
+  margin: 0;
+  color: var(--wr-muted, #6b6459);
+  font-size: 13px;
+}
+
+@media print {
+  .wr-print-preview {
+    padding: 0;
+    background: var(--wr-bg, #fff);
+  }
+
+  .wr-print-preview-bar {
+    display: none;
+  }
+
+  .wr-sheet {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+}

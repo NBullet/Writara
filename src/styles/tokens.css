@@ -1,0 +1,125 @@
+:root {
+  color-scheme: light dark;
+
+  --wr-bg: #ffffff;
+  --wr-surface: #f7f5f0;
+  --wr-text: #26221d;
+  --wr-muted: #8a8175;
+  --wr-border: #e2ddd2;
+  --wr-accent: #b4472e;
+  --wr-link: #2f6f8f;
+  --wr-selection: #b4472e26;
+  --wr-code-bg: #f2efe7;
+  /* ==高亮== 的底色：编辑器与打印共用，避免一边黄一边主题色 */
+  --wr-mark-bg: #f6e6b8b3;
+
+  --wr-font-prose: "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    "Noto Sans SC", sans-serif;
+  --wr-font-heading: "Iowan Old Style", "Source Han Serif SC",
+    "Noto Serif SC", "Songti SC", Georgia, serif;
+  --wr-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --wr-font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas,
+    monospace;
+
+  --wr-font-size: 17px;
+  --wr-measure: 42rem;
+  --wr-radius: 8px;
+
+  /*
+   * ── 排版基准（唯一来源）──────────────────────────────────────────────
+   * 取 GitHub Markdown CSS（github-markdown-css / Primer）的标题阶梯与间距关系：
+   * 标题 2 / 1.5 / 1.25 / 1 / .875 / .85 em，标题与上文留一行、与下文贴紧。
+   * 只有两处按中文和「源码空行就是段距」的模型调整，其余不再各自发挥：
+   *   · 行高 1.7（上游 1.5）——中文需要更大的行距；
+   *   · 段间距 = 一行空行（1.7em，上游 16px）。编辑器里两段之间本来就是那条空行，
+   *     打印按同样的距离给 margin，于是屏幕与纸面天然一致。
+   * 要改排版只改这一组值：编辑器主题与打印样式都只引用它们，不许另写 px。
+   */
+  --wr-lh: 1.7;
+  --wr-h1: 2;
+  --wr-h2: 1.5;
+  --wr-h3: 1.25;
+  --wr-h4: 1;
+  --wr-h5: 0.875;
+  --wr-h6: 0.85;
+  --wr-heading-lh: 1.3;
+  /* 标题与下段之间的间隔系数（按正文字号换算，不受标题自身字号影响） */
+  --wr-heading-ratio: 0.3;
+  --wr-heading-bottom: calc(var(--wr-font-size, 17px) * var(--wr-heading-ratio));
+  --wr-code-scale: 0.9;
+  --wr-code-size: calc(var(--wr-code-scale) * 1em);
+  --wr-list-indent: 1.6em;
+
+  /*
+   * ── 外壳基准（唯一来源）──────────────────────────────────────────────
+   * 外壳 UI（工具栏 / 对话框 / 浮条 / AI 面板 / 提示层）与编辑器内容共用
+   * 上面那组文档变量；这里补充外壳自己的间距、字号与状态色。
+   * 新增外壳样式只引用这一组变量，不许写死色值 —— 由 styles/tokens.test.ts 守住。
+   * 改这里全局生效。
+   */
+  /* 间距档（4 的倍数，1=4px 起） */
+  --wr-space-1: 4px;
+  --wr-space-2: 8px;
+  --wr-space-3: 12px;
+  --wr-space-4: 16px;
+  --wr-space-5: 24px;
+  --wr-space-6: 32px;
+  /* 字号档 */
+  --wr-ui-fz: 13px;
+  --wr-ui-fz-sm: 12.5px;
+  --wr-ui-fz-xs: 11px;
+  /* 圆角档（与 --wr-radius 8px 搭配） */
+  --wr-radius-sm: 5px;
+  --wr-radius-lg: 10px;
+  /* 语义色：沿用现有视觉语言 —— 成功取链接色，错误取警示红（高亮/错误横幅同源） */
+  --wr-ok: var(--wr-link);
+  --wr-bad: #c0392b;
+  /* diff 底色由语义色派生，六主题与暗色自动跟随 */
+  --wr-diff-ins-bg: color-mix(in srgb, var(--wr-ok) 16%, transparent);
+  --wr-diff-del-bg: color-mix(in srgb, var(--wr-bad) 12%, transparent);
+  /* 实心强调块（accent 背景）上的文字，白底字沿用既有行为 */
+  --wr-ink: #fff;
+  /* 遮罩与浮层阴影 */
+  --wr-scrim: rgb(0 0 0 / 40%);
+  --wr-shadow-float: 0 2px 8px rgb(0 0 0 / 14%);
+  --wr-shadow-pop: 0 12px 32px rgb(0 0 0 / 18%);
+  --wr-shadow-sheet: 0 18px 48px rgb(0 0 0 / 22%);
+  /* z 层级：旧界面维持原值，新组件声明层级一律用这里的档位 */
+  --wr-z-float: 40; /* 挂在编辑器上的浮条（图片浮条同档，不同时出现） */
+  --wr-z-ai: 48; /* AI 审阅浮层，压过所有浮条 */
+  --wr-z-dialog: 60; /* 对话框 / 抽屉层 */
+  --wr-z-toast: 70;
+
+  /* A4 内容宽度：210mm − 2×16mm 页边距 ≈ 178mm ≈ 672px（96dpi）。
+     编辑区最小宽度不低于它，屏幕排版才和纸面一致。 */
+  --wr-a4-width: 672px; /* 提示层最顶 */
+}
+
+:root[data-theme="dark"] {
+  --wr-bg: #1c1a17;
+  --wr-surface: #232019;
+  --wr-text: #e8e2d8;
+  --wr-muted: #9a9287;
+  --wr-border: #3a352d;
+  --wr-accent: #e0836a;
+  --wr-link: #86bcd4;
+  --wr-selection: #e0836a33;
+  --wr-code-bg: #2c2822;
+  --wr-bad: #e99184;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --wr-bg: #1c1a17;
+    --wr-surface: #232019;
+    --wr-text: #e8e2d8;
+    --wr-muted: #9a9287;
+    --wr-border: #3a352d;
+    --wr-accent: #e0836a;
+    --wr-link: #86bcd4;
+    --wr-selection: #e0836a33;
+    --wr-code-bg: #2c2822;
+    --wr-bad: #e99184;
+  }
+}

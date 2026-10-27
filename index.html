@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f5f0" />
+    <meta name="description" content="Writara｜文叙 —— 自然书写，即刻呈现" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <title>Writara｜文叙</title>
+    <style>
+      /* 启动页样式先于应用样式内联：Vite/JS 还没跑时窗口也有东西可看。 */
+      html,
+      body {
+        margin: 0;
+        background: #f7f5f0;
+        color: #26221d;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+      }
+
+      /* Lucian UX/UI Prompt #256 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#256
+         计数 → 细条 → 上下分裂揭示，颜色映射到 Writara 主题。 */
+      .ws {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        overflow: hidden;
+        background: #f7f5f0;
+        color: #26221d;
+      }
+
+      .ws-half {
+        position: absolute;
+        right: 0;
+        left: 0;
+        height: 50.5%;
+        background: #f7f5f0;
+        transition: transform 0.6s cubic-bezier(0.76, 0, 0.24, 1);
+      }
+
+      .ws-half.is-top {
+        top: 0;
+      }
+
+      .ws-half.is-bottom {
+        bottom: 0;
+      }
+
+      .ws.is-done .ws-half.is-top {
+        transform: translateY(-101%);
+      }
+
+      .ws.is-done .ws-half.is-bottom {
+        transform: translateY(101%);
+      }
+
+      .ws-center {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        transition: opacity 0.3s;
+      }
+
+      .ws.is-done .ws-center {
+        opacity: 0;
+      }
+
+      .ws-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+
+      .ws-mark {
+        display: grid;
+        width: 38px;
+        height: 38px;
+        place-items: center;
+        border-radius: 11px;
+        background: #b4472e;
+        color: #fff;
+        font-weight: 800;
+      }
+
+      .ws-count {
+        font-size: 64px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.05em;
+        line-height: 0.9;
+      }
+
+      .ws-count i {
+        margin-left: 2px;
+        font-size: 22px;
+        font-style: normal;
+        vertical-align: top;
+      }
+
+      .ws-bar {
+        width: 180px;
+        height: 2px;
+        background: rgba(38, 34, 29, 0.16);
+      }
+
+      .ws-bar i {
+        display: block;
+        width: 0;
+        height: 100%;
+        background: #b4472e;
+        transition: width 0.18s ease-out;
+      }
+
+      .ws-tagline {
+        margin: 0;
+        color: #8a8175;
+        font-size: 12px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html,
+        body,
+        .ws,
+        .ws-half {
+          background: #1c1a17;
+          color: #e8e2d8;
+        }
+
+        .ws-mark {
+          background: #e0836a;
+          color: #1c1a17;
+        }
+
+        .ws-bar {
+          background: rgba(232, 226, 216, 0.18);
+        }
+
+        .ws-bar i {
+          background: #e0836a;
+        }
+
+        .ws-tagline {
+          color: #9a9287;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .ws-half,
+        .ws-center,
+        .ws-bar i {
+          transition-duration: 0.001ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <div id="wr-splash" class="ws" aria-label="正在启动 Writara">
+      <div class="ws-half is-top"></div>
+      <div class="ws-half is-bottom"></div>
+      <div class="ws-center">
+        <div class="ws-brand">
+          <span class="ws-mark" aria-hidden="true">W</span>
+          <span>Writara</span>
+        </div>
+        <div class="ws-count"><span id="ws-num">0</span><i>%</i></div>
+        <div class="ws-bar"><i id="ws-fill"></i></div>
+        <p class="ws-tagline">自然书写，即刻呈现</p>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
