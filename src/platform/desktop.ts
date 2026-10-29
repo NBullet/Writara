@@ -62,8 +62,10 @@ export function createDesktopFs(): PlatformFs {
     kind: "desktop",
     canWrite: true,
 
-    async openFile(): Promise<OpenedFile | null> {
-      const file = await call(() => fs().openFile());
+    async openFile(defaultDir?: string | null): Promise<OpenedFile | null> {
+      const file = await call(() =>
+        fs().openFile(defaultDir ? { defaultPath: defaultDir } : undefined),
+      );
       if (!file) return null;
       return {
         name: file.name,
@@ -92,7 +94,10 @@ export function createDesktopFs(): PlatformFs {
     async restoreAccess(ref: DocRef): Promise<void> {
       const target = ref.native;
       if (typeof target !== "string") return;
-      await call(() => fs().authorizeRestore([target]));
+      const restored = await call(() => fs().authorizeRestore([target]));
+      // 文件被移动 / 删除 / 扩展名不受支持时授权不会成功。明确抛出来，
+      // 让恢复流程能区分「文件没了」和「只是暂时读不到」，别一律提示重新授权。
+      if (!restored) throw new Error("文件不存在或已被移动");
     },
 
     async restoreRootAccess(root: WorkspaceRoot): Promise<void> {

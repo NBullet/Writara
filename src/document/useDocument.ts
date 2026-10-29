@@ -41,7 +41,7 @@ export interface DocumentController {
   /** 每次「从外部换掉文本」自增，用来让编辑器同步，而不是把 doc 变成受控值。 */
   loadToken: number;
   setText: (text: string) => void;
-  open: () => Promise<void>;
+  open: (defaultDir?: string | null) => Promise<void>;
   /** 打开工作区里的文件（身份已知，保存时直接写回）。 */
   openExternal: (
     text: string,
@@ -143,6 +143,7 @@ export function useDocument(options: DocumentOptions = {}): DocumentController {
 
       let disk: string | null = null;
       let diskFormat: TextFormat = DEFAULT_FORMAT;
+      let missing = false;
       try {
         if (await platform().canWriteTo(record.ref)) {
           // 重启后主进程的白名单是空的：先把会话里的这个路径重新登记，再读。
@@ -152,15 +153,36 @@ export function useDocument(options: DocumentOptions = {}): DocumentController {
             disk = normalizeLineEndings(raw.text);
             diskFormat = { encoding: raw.encoding, bom: raw.bom };
             setLineEndingState(detectLineEnding(raw.text));
+          } else {
+            missing = true;
           }
         }
-      } catch {
+      } catch (cause) {
+        // 文件确实不在了，还是只是这次读不到（权限 / 占用），提示和保存出口不一样。
+        missing = describeFileError(cause) === "文件不存在或已被移动";
         disk = null;
       }
       if (cancelled) return;
 
       if (disk === null) {
-        setNotice("上次的文件需要重新授权后才能保存回原文件。");
+        // 读不到磁盘也要把「身份」留下：
+        // - 浏览器：Ctrl+S 会在用户手势里重新申请权限，能直接写回原文件；
+        // - 桌面端：文件只是暂时不可读时，Ctrl+S 仍能写回原路径。
+        // 但自动保存先停住 —— 连磁盘都读不到，静默写回可能覆盖别处的改动。
+        adopt({
+          text,
+          name: record.name,
+          ref: missing ? null : record.ref,
+          savedText: record.savedText,
+        });
+        setAutoSavePaused(true);
+        setNotice(
+          missing
+            ? "上次的文件现在找不到了（可能被移动或删除）。当前显示的是本地草稿，请用「另存为」保存一份。"
+            : platform().kind === "desktop"
+              ? "上次的文件这次读不到（可能被占用或暂时不可用）。当前显示的是本地草稿：按 Ctrl+S 会再试一次写回原文件，或用「另存为」另存一份。"
+              : "上次的文件需要重新授权后才能保存回原文件。当前显示的是本地草稿：按 Ctrl+S 会重新申请权限，或用「另存为」另存一份。",
+        );
         return;
       }
 
@@ -252,10 +274,10 @@ export function useDocument(options: DocumentOptions = {}): DocumentController {
     setError(null);
   }, []);
 
-  const open = useCallback(async () => {
+  const open = useCallback(async (defaultDir?: string | null) => {
     try {
       setError(null);
-      const file = await platform().openFile();
+      const file = await platform().openFile(defaultDir);
       if (!file) return;
       const ending = detectLineEnding(file.text);
       const normalized = normalizeLineEndings(file.text);
@@ -343,18 +365,31 @@ export function useDocument(options: DocumentOptions = {}): DocumentController {
     if (saving) return false;
     const snapshot = currentText ?? text;
     // 已经保存过且没有改动：不重复写盘，也不弹权限框。
-    if (snapshot === savedText && ref) return true;
+    // 例外：刷新后句柄的写权限可能已经失效 —— 这时 Ctrl+S 是用户主动「重新授权」的时机，
+    // 否则没有改动就永远拿不回来（提示条上写的「按 Ctrl+S 重新申请权限」会变成空操作）。
+    if (snapshot === savedText && ref) {
+      if (!(await platform().canWriteTo(ref))) await platform().requestAccess(ref);
+      return true;
+    }
     setSaving(true);
     setError(null);
     try {
+      /** 读盘失败（文件没了 / 权限没了）：决定这次还能不能安全写回原路径。 */
+      let unreadable = false;
+      // 用磁盘上实际的编码与 BOM 写回，别拿可能过期的设置去覆盖原文件。
+      let writeFormat = format;
       if (ref) {
         // 先确认磁盘内容没被别处改过。
         let disk: string | null = null;
         try {
           const raw = await platform().read(ref);
-          disk = raw === null ? null : normalizeLineEndings(raw.text);
+          if (raw === null) unreadable = true;
+          else {
+            disk = normalizeLineEndings(raw.text);
+            writeFormat = { encoding: raw.encoding, bom: raw.bom };
+          }
         } catch {
-          disk = null; // 权限未授予时读不到，交给 save() 去申请
+          unreadable = true; // 权限未授予时读不到，浏览器会在写回调里重新申请
         }
         if (disk !== null && disk !== savedText) {
           const overwrite =
@@ -367,11 +402,15 @@ export function useDocument(options: DocumentOptions = {}): DocumentController {
         }
       }
 
+      // 桌面端读不到原文件时不能盲写：编码 / BOM 判断不出来，GBK 文件会一次写坏。
+      // 退回「另存为」，让用户自己选位置；浏览器端只有 UTF-8，写回调会重新申请权限。
+      const writeRef = ref && (platform().kind === "browser" || !unreadable) ? ref : null;
+
       const result = await platform().save({
         text: applyLineEnding(snapshot, lineEnding),
-        ref,
+        ref: writeRef,
         suggestedName: name,
-        format,
+        format: writeFormat,
       });
       if (!result) return false; // 用户取消
 

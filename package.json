@@ -2,7 +2,7 @@
   "name": "writara",
   "productName": "Writara",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "自然书写，即刻呈现 —— Typora 式的即时渲染 Markdown 编辑器",
   "author": "NBullet <nbullet@126.com>",
   "type": "module",

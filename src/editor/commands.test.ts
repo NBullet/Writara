@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { forceParsing } from "@codemirror/language";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { writaraExtensions } from "./extensions";
@@ -9,6 +10,7 @@ import {
   deleteLine,
   demoteHeading,
   findTableContext,
+  indentBlock,
   indentList,
   insertCodeBlock,
   insertFootnote,
@@ -143,11 +145,70 @@ describe("块级", () => {
   });
 
   it("列表缩进", () => {
-    mount("- 项目", 2);
+    const doc = "- 一\n- 项目";
+    mount(doc, doc.indexOf("- 项目") + 2);
+    forceParsing(view!, view!.state.doc.length);
     indentList(view!, 1);
-    expect(text()).toBe("  - 项目");
+    expect(text()).toBe("- 一\n  - 项目");
     indentList(view!, -1);
-    expect(text()).toBe("- 项目");
+    expect(text()).toBe(doc);
+  });
+
+  it("Tab 缩进列表项时子项跟着走", () => {
+    const doc = "- 一\n- 二\n  - 子";
+    mount(doc, doc.indexOf("- 二") + 2);
+    forceParsing(view!, view!.state.doc.length);
+    indentBlock(view!, 1);
+    expect(text()).toBe("- 一\n  - 二\n    - 子");
+    indentBlock(view!, -1);
+    expect(text()).toBe(doc);
+  });
+
+  it("第一个列表项与重复 Tab 都不会无限右移", () => {
+    mount("- 一\n- 二", 2);
+    forceParsing(view!, view!.state.doc.length);
+    indentBlock(view!, 1);
+    expect(text()).toBe("- 一\n- 二");
+
+    mount("- 一\n- 二", "- 一\n- 二".indexOf("- 二") + 2);
+    forceParsing(view!, view!.state.doc.length);
+    indentBlock(view!, 1);
+    expect(text()).toBe("- 一\n  - 二");
+    // 已经挂到上一个兄弟项下面：再按 Tab 不再右移
+    indentBlock(view!, 1);
+    expect(text()).toBe("- 一\n  - 二");
+  });
+
+  it("引用里的列表缩进保留 > 前缀", () => {
+    const doc = "> - 一\n> - 二";
+    mount(doc, doc.indexOf("> - 二") + 4);
+    forceParsing(view!, view!.state.doc.length);
+    indentBlock(view!, 1);
+    expect(text()).toBe("> - 一\n>   - 二");
+  });
+
+  it("Tab 在普通段落里插入缩进单位，Shift+Tab 退掉", () => {
+    mount("正文", 0);
+    indentBlock(view!, 1);
+    expect(text()).toBe("  正文");
+    indentBlock(view!, -1);
+    expect(text()).toBe("正文");
+  });
+
+  it("有序列表的缩进步长按标记宽度算", () => {
+    const doc = "1. 一\n2. 二";
+    mount(doc, doc.indexOf("2. 二") + 2);
+    forceParsing(view!, view!.state.doc.length);
+    indentBlock(view!, 1);
+    expect(text()).toBe("1. 一\n   2. 二");
+    indentBlock(view!, -1);
+    expect(text()).toBe(doc);
+  });
+
+  it("选中多行时 Tab 整段缩进", () => {
+    mount("一\n二", 0, 3);
+    indentBlock(view!, 1);
+    expect(text()).toBe("  一\n  二");
   });
 
   it("插入分隔线、目录、Front Matter", () => {

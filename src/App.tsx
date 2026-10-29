@@ -932,6 +932,19 @@ export function App() {
     return typeof native === "string" && native ? native : null;
   }, []);
 
+  /**
+   * 「打开…」对话框的起始目录：当前文档所在目录，其次工作区根。
+   * 不给的话 Windows 会停在任意位置，用户只能把相对路径粘进文件名框 —— 那是无效文件名。
+   */
+  const openDialogDir = useCallback((): string | null => {
+    const native = doc.ref && typeof doc.ref.native === "string" ? doc.ref.native : null;
+    if (native) {
+      const dir = dirnameOf(native);
+      if (dir) return dir;
+    }
+    return workspace.root && typeof workspace.root.native === "string" ? workspace.root.native : null;
+  }, [doc.ref, workspace.root]);
+
   const workspaceRootPath = workspace.root ? absolutePathOf(workspace.root.native) : null;
 
   const joinWorkspacePath = useCallback(
@@ -2239,7 +2252,7 @@ export function App() {
         case "open":
           void (async () => {
             if (!(await ensureSaved())) return;
-            await withBusy("正在打开文件…", () => doc.open());
+            await withBusy("正在打开文件…", () => doc.open(openDialogDir()));
           })();
           return;
         case "open-folder":
@@ -2572,6 +2585,7 @@ export function App() {
       insertTableDialog,
       liveText,
       openFind,
+      openDialogDir,
       openProjectAi,
       openRecent,
       openRecentByPath,

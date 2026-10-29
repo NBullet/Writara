@@ -341,6 +341,15 @@ describe("live preview 装饰", () => {
     expect(editor.dom.querySelector(".cm-search")).not.toBeNull();
   });
 
+  it("Tab 在编辑器里缩进列表项，不把焦点带出编辑区", () => {
+    const doc = "- 一\n- 项目";
+    const editor = mount(doc, doc.indexOf("- 项目") + 2);
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    editor.contentDOM.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(editor.state.doc.toString()).toBe("- 一\n  - 项目");
+  });
+
   it("任务列表渲染成可点击方框，点击写回文档", () => {    const editor = mount("前言\n\n- [ ] 待办");
     const box = editor.contentDOM.querySelector<HTMLElement>(".cm-md-task");
     expect(box?.textContent).toBe("☐");

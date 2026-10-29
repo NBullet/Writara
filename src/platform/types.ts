@@ -84,7 +84,7 @@ export interface PlatformFs {
   /** 是否能写回原文件；false 时保存会退化成下载。 */
   readonly canWrite: boolean;
 
-  openFile(): Promise<OpenedFile | null>;
+  openFile(defaultDir?: string | null): Promise<OpenedFile | null>;
   /** 按绝对路径打开（命令行参数 / 文件关联）。桌面端才有。 */
   openPath?(target: string): Promise<OpenedFile | null>;
   read(ref: DocRef): Promise<TextContent | null>;

@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld("writara", {
   platform: process.platform,
 
   fs: {
-    openFile: () => ipcRenderer.invoke("fs:open"),
+    openFile: (options) => ipcRenderer.invoke("fs:open", options),
     read: (target) => ipcRenderer.invoke("fs:read", target),
     save: (request) => ipcRenderer.invoke("fs:save", request),
     write: (target, text, format) =>

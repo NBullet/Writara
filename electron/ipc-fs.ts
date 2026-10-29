@@ -396,10 +396,16 @@ export function registerFileIpc(): void {
 
   handle("fs:authorizeRestore", async (payload) => authorizeRestore(payload));
 
-  handle("fs:open", async () => {
+  handle("fs:open", async (payload) => {
+    // 从当前文档 / 工作区目录打开：Windows 的打开对话框没有「上次目录」时
+    // 会停在任意位置，用户只好把相对路径粘进文件名框，结果报「文件名无效」。
+    const { defaultPath } = (payload ?? {}) as { defaultPath?: unknown };
+    const initial =
+      typeof defaultPath === "string" && path.isAbsolute(defaultPath) ? defaultPath : undefined;
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
       filters: MD_FILTER,
+      ...(initial ? { defaultPath: initial } : {}),
     });
     const file = result.filePaths[0];
     if (result.canceled || !file) return null;

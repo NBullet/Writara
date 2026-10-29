@@ -1,7 +1,9 @@
 import { redo, undo } from "@codemirror/commands";
-import type { ChangeSpec, EditorState, Line } from "@codemirror/state";
+import { indentUnit, syntaxTree } from "@codemirror/language";
+import type { ChangeSpec, EditorState, Line, SelectionRange } from "@codemirror/state";
 import { EditorSelection } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
+import type { SyntaxNode } from "@lezer/common";
 
 import { splitRow } from "../markdown/table";
 
@@ -205,12 +207,220 @@ export function toggleList(view: EditorView, kind: ListKind): boolean {
   return true;
 }
 
-export function indentList(view: EditorView, direction: 1 | -1): boolean {
-  replaceLines(view, (text) =>
-    direction > 0 ? `  ${text}` : text.replace(/^ {1,2}/, ""),
-  );
-  view.focus();
+/** 行首的引用前缀（`> ` / `> > `）：缩进要插在它后面，不能把 `>` 推走。 */
+const QUOTE_PREFIX = /^(?:[ \t]*>[ \t]?)+/;
+const LIST_MARKER = /^([ \t]*)([-*+]|\d+[.)])([ \t]+)/;
+
+function quotePrefix(text: string): string {
+  return QUOTE_PREFIX.exec(text)?.[0] ?? "";
+}
+
+interface ListMarker {
+  /** 行首引用前缀（按原样保留，缩进插在它后面）。 */
+  prefix: string;
+  /** 前缀之后的缩进（字符数）。 */
+  indent: number;
+  /** 标记本身的宽度：`- ` 是 2，`1. ` 是 3。 */
+  width: number;
+}
+
+function markerOf(text: string): ListMarker | null {
+  const prefix = quotePrefix(text);
+  const match = LIST_MARKER.exec(text.slice(prefix.length));
+  if (!match) return null;
+  return {
+    prefix,
+    indent: (match[1] ?? "").length,
+    width: (match[2] ?? "").length + (match[3] ?? "").length,
+  };
+}
+
+/**
+ * 同一层级的上一个列表项的**内容列**（相对引用前缀）。
+ *
+ * 只允许挂到上一个兄弟项下面：第一项没有可挂的父级，Tab 就应该什么都不做。
+ * 这也是缩进的硬边界 —— 没有它，按住 Tab 会让整块无限右移，正文被挤成
+ * 一行一个屏幕宽，布局直接卡死（见 editing-bugs.md）。
+ */
+function previousSiblingColumn(state: EditorState, first: number, marker: ListMarker): number | null {
+  for (let number = first - 1; number >= 1; number -= 1) {
+    const line = state.doc.line(number);
+    const prefix = quotePrefix(line.text);
+    // 空行与空的引用行可以跨过（松散列表）。
+    if (line.text.slice(prefix.length).trim() === "") continue;
+    if (prefix !== marker.prefix) return null;
+    const indent = /^[ \t]*/.exec(line.text.slice(prefix.length))?.[0].length ?? 0;
+    if (indent < marker.indent) return null;
+    if (indent > marker.indent) continue; // 上一项的续行 / 子项，继续往上找
+    const sibling = markerOf(line.text);
+    // 同层但不是列表项：列表已经结束，宁可不缩进也不要缩错。
+    return sibling ? sibling.indent + sibling.width : null;
+  }
+  return null;
+}
+
+/**
+ * 列表缩进的步长取「标记宽度」，至少一个缩进单位。
+ * 有序列表的标记是 `1. `（3 列），只加 2 个空格的话解析器根本不认为它嵌套了。
+ */
+function indentStep(state: EditorState, lineNumber: number, unit: string): string {
+  const marker = markerOf(state.doc.line(lineNumber).text);
+  if (!marker) return unit;
+  return " ".repeat(Math.max(unit.length, marker.width));
+}
+
+/** 行首缩进最多退掉一个缩进步长；Tab 缩进算一整个步长。 */
+function dedentWidth(text: string, step: string): number {
+  let width = 0;
+  while (width < text.length && width < step.length) {
+    const char = text[width];
+    if (char === "\t") return width + 1;
+    if (char !== " ") break;
+    width += 1;
+  }
+  return width;
+}
+
+/** 光标所在的列表项节点，连同它的子项与续行。 */
+function listItemBlock(state: EditorState, pos: number): { first: number; last: number } | null {
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, -1);
+  while (node) {
+    if (node.name === "ListItem") {
+      const first = state.doc.lineAt(node.from).number;
+      const end = node.to > node.from ? node.to - 1 : node.from;
+      return { first, last: state.doc.lineAt(end).number };
+    }
+    node = node.parent;
+  }
+  return null;
+}
+
+function rangeLines(state: EditorState, range: SelectionRange): {
+  first: number;
+  last: number;
+} {
+  const first = state.doc.lineAt(range.from).number;
+  const lastLine = state.doc.lineAt(range.to);
+  // 选区正好停在下一行行首时，那一行不算被选中（与 CodeMirror 的 indentMore 同口径）。
+  const last = !range.empty && range.to === lastLine.from ? lastLine.number - 1 : lastLine.number;
+  return { first, last: Math.max(first, last) };
+}
+
+/** 按行平移缩进；插入点在行首（引用块里是 `>` 之后），光标要跟着文字一起走。 */
+function shiftLines(
+  view: EditorView,
+  numbers: number[],
+  direction: 1 | -1,
+  step: string,
+): boolean {
+  const state = view.state;
+  const changes: ChangeSpec[] = [];
+  for (const number of numbers) {
+    const line = state.doc.line(number);
+    const offset = quotePrefix(line.text).length;
+    const rest = line.text.slice(offset);
+    if (direction > 0) {
+      if (rest.trim() === "") continue;
+      changes.push({ from: line.from + offset, insert: step });
+    } else {
+      const width = dedentWidth(rest, step);
+      if (width > 0) changes.push({ from: line.from + offset, to: line.from + offset + width });
+    }
+  }
+  if (changes.length === 0) return false;
+
+  const changeSet = state.changes(changes);
+  view.dispatch({
+    changes: changeSet,
+    // 与 CodeMirror 的 indentMore 一致：assoc 1，光标落在新增缩进之后。
+    selection: state.selection.map(changeSet, 1),
+    userEvent: "input.indent",
+  });
   return true;
+}
+
+function lineNumbers(first: number, last: number): number[] {
+  return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+}
+
+/**
+ * 列表项整块缩进 / 退回。
+ *
+ * 缩进只挂到「上一个兄弟项」的内容列：这一项没有上一个兄弟项时不动，
+ * 否则按住 Tab 会无限右移（行被挤到屏幕外、布局卡死）。
+ */
+function indentListItem(
+  view: EditorView,
+  block: { first: number; last: number },
+  direction: 1 | -1,
+  unit: string,
+): void {
+  const state = view.state;
+  const marker = markerOf(state.doc.line(block.first).text);
+  const numbers = lineNumbers(block.first, block.last);
+  if (!marker) {
+    if (direction > 0) shiftLines(view, numbers, 1, unit);
+    else shiftLines(view, numbers, -1, unit);
+    return;
+  }
+
+  if (direction > 0) {
+    const target = previousSiblingColumn(state, block.first, marker);
+    if (target === null) return;
+    const delta = target - marker.indent;
+    if (delta <= 0) return;
+    shiftLines(view, numbers, 1, " ".repeat(delta));
+    return;
+  }
+
+  // 退回一层：最多退掉自己标记的宽度（`- ` = 2、`1. ` = 3）。
+  const step = Math.min(marker.indent, marker.width);
+  if (step <= 0) return;
+  shiftLines(view, numbers, -1, " ".repeat(step));
+}
+
+/**
+ * Tab / Shift+Tab（菜单的「增加 / 减少缩进」同一条路径）。
+ *
+ * - 在列表项里：**整块**缩进，且只能挂到上一个兄弟项下面（第一项不动）。
+ * - 有选区：按整行缩进，与多数编辑器一致。
+ * - 普通段落 / 代码块：Tab 在光标处插入一个缩进单位。
+ * - Shift+Tab 退不掉时也吞掉按键：不让焦点被 Tab 带出编辑区（Ctrl+M 可切换焦点模式）。
+ */
+export function indentBlock(view: EditorView, direction: 1 | -1): boolean {
+  const state = view.state;
+  const unit = state.facet(indentUnit) || "  ";
+  const main = state.selection.main;
+
+  if (main.empty) {
+    const block = listItemBlock(state, main.head);
+    if (block) {
+      indentListItem(view, block, direction, unit);
+      return true;
+    }
+
+    if (direction > 0) {
+      view.dispatch(state.replaceSelection(unit), { scrollIntoView: true, userEvent: "input" });
+      return true;
+    }
+
+    const line = state.doc.lineAt(main.head);
+    shiftLines(view, [line.number], -1, unit);
+    return true;
+  }
+
+  const numbers = new Set<number>();
+  for (const range of state.selection.ranges) {
+    const { first, last } = rangeLines(state, range);
+    for (const number of lineNumbers(first, last)) numbers.add(number);
+  }
+  const step = indentStep(state, state.doc.lineAt(main.from).number, unit);
+  shiftLines(view, [...numbers].sort((a, b) => a - b), direction, step);
+  return true;
+}
+
+export function indentList(view: EditorView, direction: 1 | -1): boolean {
+  return indentBlock(view, direction);
 }
 
 export function insertParagraph(view: EditorView, where: "above" | "below"): boolean {

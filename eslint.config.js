@@ -11,6 +11,7 @@ const nodeGlobals = {
   __filename: "readonly",
   Buffer: "readonly",
   console: "readonly",
+  fetch: "readonly",
   setTimeout: "readonly",
   clearTimeout: "readonly",
   URL: "readonly",

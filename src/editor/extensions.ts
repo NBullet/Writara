@@ -17,6 +17,7 @@ import {
 import { tags } from "@lezer/highlight";
 
 import { editorOptions, modeExtension, previewExtension } from "./modes";
+import { indentBlock } from "./commands";
 import { aiSelectionToolbar } from "./ai-toolbar";
 import { imageDrop } from "./image-drop";
 import { fenceLanguageSource } from "./language-completion";
@@ -74,7 +75,14 @@ export function writaraExtensions(onChange?: (doc: string) => void): Extension[]
     slopMarksField,
     // 选区浮条不分模式：源码模式下也要能对选中文字出 AI 动作
     aiSelectionToolbar(),
-    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+    keymap.of([
+      // Tab 在编辑器里必须缩进：不绑定的话浏览器会把焦点带出编辑区。
+      // 需要键盘跳出编辑区时用 Ctrl+M（CodeMirror 的 tab focus mode）。
+      { key: "Tab", run: (view) => indentBlock(view, 1), shift: (view) => indentBlock(view, -1) },
+      ...defaultKeymap,
+      ...historyKeymap,
+      ...searchKeymap,
+    ]),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) onChange?.(update.state.doc.toString());
     }),

@@ -58,7 +58,7 @@ export interface DesktopBridge {
   readonly platform: string;
 
   fs: {
-    openFile(): Promise<{
+    openFile(options?: { defaultPath?: string }): Promise<{
       path: string;
       name: string;
       text: string;
