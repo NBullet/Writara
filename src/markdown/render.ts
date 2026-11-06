@@ -255,12 +255,10 @@ class HtmlRenderer {
         if (next) {
           // 标题与下一块：默认绑在一起避免页尾孤行；表格不绑（否则跨页表头会丢）。
           const keep = HtmlRenderer.KEEP_WITH_HEADING.has(next.name) || HEADING.test(next.name);
-          // 源码里标题和下一块之间如果有空行，编辑器里那一行是看得见的空白，
-          // 打印没有空行，所以要按同样的距离补出来（见 printStyles 的 .wr-gap）。
-          const blank = /^\s*$/.test(this.src.slice(child.to, next.from));
-          if (keep || blank) {
-            const cls = [keep ? "wr-keep" : "", blank ? "wr-gap" : ""].filter(Boolean).join(" ");
-            out += `<div class="${cls}">\n${html}${this.block(next)}</div>\n`;
+          // 标题后面的空行不额外补间距：Typora 里空行不产生空白，
+          // 间距由标题自己的 margin-bottom（--head-gap）提供。
+          if (keep) {
+            out += `<div class="wr-keep">\n${html}${this.block(next)}</div>\n`;
             index += 1;
             continue;
           }
@@ -281,7 +279,10 @@ class HtmlRenderer {
       const level = Number(heading[1]);
       const id = this.headingIdAt.get(node.from) ?? slugify(this.src.slice(node.from, node.to));
       const html = this.inline(node).trim();
-      return `<h${level} id="${esc(id)}">${html}</h${level}>\n`;
+      // 没有空行时给标题补上间距（编辑器用 padding-top，这里用 margin-top）
+      const prev = node.prevSibling;
+      const tight = prev ? !/\n[ \t]*\n/.test(this.src.slice(prev.to, node.from)) : false;
+      return `<h${level} id="${esc(id)}"${tight ? ' class="wr-tight"' : ""}>${html}</h${level}>\n`;
     }
 
     if (node.name === "Paragraph") {
@@ -406,27 +407,57 @@ class HtmlRenderer {
     const rows = node.getChildren("TableRow");
     const align = this.tableAlignment(node);
     const percents = this.tableWidths(node);
+    const cols = Math.max(
+      align.length,
+      header ? header.getChildren("TableCell").length : 0,
+      1,
+    );
 
-    const renderCell = (cell: SyntaxNode, index: number, tag: "th" | "td"): string => {
+    const renderCell = (cell: SyntaxNode | null, index: number, tag: "th" | "td"): string => {
       const cls = ALIGN_CLASS[align[index] ?? ""] ?? "";
       const attr = cls ? ` class="${cls}"` : "";
-      return `<${tag}${attr}>${this.inline(cell).trim()}</${tag}>`;
+      return `<${tag}${attr}>${cell ? this.inline(cell).trim() : ""}</${tag}>`;
     };
     let out = percents.length > 0 ? '<table class="wr-fixed">\n' : "<table>\n";
     if (percents.length > 0) {
       out += `<colgroup>${percents.map((percent) => `<col style="width:${percent}%">`).join("")}</colgroup>\n`;
     }
     if (header) {
-      const cells = header.getChildren("TableCell");
-      out += "<thead>\n<tr>" + cells.map((cell, i) => renderCell(cell, i, "th")).join("") + "</tr>\n</thead>\n";
+      const cells = this.tableCells(header, cols);
+      out +=
+        "<thead>\n<tr>" +
+        cells.map((cell, index) => renderCell(cell, index, "th")).join("") +
+        "</tr>\n</thead>\n";
     }
     out += "<tbody>\n";
     for (const row of rows) {
-      const cells = row.getChildren("TableCell");
-      out += "<tr>" + cells.map((cell, i) => renderCell(cell, i, "td")).join("") + "</tr>\n";
+      const cells = this.tableCells(row, cols);
+      out += "<tr>" + cells.map((cell, index) => renderCell(cell, index, "td")).join("") + "</tr>\n";
     }
     out += "</tbody>\n</table>\n";
     return out;
+  }
+
+  /**
+   * 把行里的 TableCell 按「它前面有几根竖线」放回列位置。
+   * 空单元格没有节点（`| 1 |  | 3 |` 只有两个 TableCell），按数组下标渲染会让
+   * 后面的内容整体左移，必须用分隔符数量还原列号。
+   */
+  private tableCells(row: SyntaxNode, cols: number): Array<SyntaxNode | null> {
+    const cells = row.getChildren("TableCell");
+    const delimiters = row.getChildren("TableDelimiter");
+    const rowText = this.src.slice(row.from, row.to);
+    const first = delimiters[0];
+    // 首根竖线前面只有空白 = 这一行带前导 `|`，列号要从它后面算起。
+    const offset = first && rowText.slice(0, first.from - row.from).trim() === "" ? 1 : 0;
+    const slots: Array<SyntaxNode | null> = new Array(cols).fill(null);
+    let pipe = 0;
+    for (const cell of cells) {
+      while (pipe < delimiters.length && delimiters[pipe]!.from < cell.from) pipe += 1;
+      const index = pipe - offset;
+      if (index >= 0 && index < cols) slots[index] = cell;
+    }
+    return slots;
   }
 
   /** GFM 对齐信息只存在于分隔行（|:--|--:|）里。 */

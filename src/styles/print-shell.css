@@ -10,19 +10,19 @@
   position: fixed;
   top: 0;
   left: -20000px;
-  width: 174mm; /* 210 - 18*2 */
+  width: calc(210mm - 2 * var(--wr-page-pad, 16mm)); /* 与 @page 的左右边距同值 */
   visibility: hidden;
   pointer-events: none;
 }
 
-/* 导出 PNG 时按 A4 纸铺开，截图后再隐藏 */
+/* 导出 PNG 时按当前版面铺开，截图后再隐藏 */
 .wr-print-host.wr-png {
   display: block !important;
   position: fixed;
   top: 0;
   left: -20000px;
-  width: 210mm;
-  padding: 20mm 18mm;
+  width: var(--wr-page-width, 210mm);
+  padding: var(--wr-page-pad-top, 20mm) var(--wr-page-pad, 16mm) var(--wr-page-pad-bottom, 22mm);
   box-sizing: border-box;
   background: #fff;
 }
@@ -46,7 +46,8 @@
   }
 }
 
-/* 屏幕上的 A4 预览（?print=1） */
+/* 屏幕上的打印预览（?print=1）。宽度取预览页自己设的 --wr-sheet-width：
+ * 编辑器里的 --wr-page-width 在「自适应」下是 100%，那只是编辑区铺满，不是纸张宽度。 */
 
 .wr-print-preview {
   min-height: 100%;
@@ -60,7 +61,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  width: 210mm;
+  width: var(--wr-sheet-width, 210mm);
   max-width: 100%;
   margin: 0 auto 14px;
   color: var(--wr-muted, #6b6459);
@@ -75,10 +76,11 @@
 }
 
 .wr-sheet {
-  width: 210mm;
+  width: var(--wr-sheet-width, 210mm);
   max-width: 100%;
   margin: 0 auto;
-  padding: 20mm 18mm;
+  /* 与编辑区同一条纸：四周页边距来自当前版面预设 */
+  padding: var(--wr-page-pad-top, 20mm) var(--wr-page-pad, 16mm) var(--wr-page-pad-bottom, 22mm);
   box-sizing: border-box;
   background: var(--wr-bg, #fff);
   box-shadow: 0 2px 24px rgba(0, 0, 0, 0.12);

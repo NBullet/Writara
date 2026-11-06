@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { promisify } from "node:util";
 import { polishDocx } from "./docx";
+import { exportBaseName } from "./save-name";
 
 /**
  * Pandoc 导出（Word / ePub）。
@@ -98,8 +99,7 @@ export async function detectPandoc(configured?: string): Promise<PandocDetectRes
 }
 
 function outputName(name: string, format: PandocFormat): string {
-  const base = name.replace(/\.(md|markdown|mdx|txt)$/i, "").trim() || "未命名";
-  return `${base}.${format}`;
+  return `${exportBaseName(name)}.${format}`;
 }
 
 function describeFailure(error: unknown): string {

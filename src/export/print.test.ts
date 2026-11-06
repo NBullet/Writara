@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 
-import { installPrintStyles, markSplittable, standaloneHtml, updatePrintView } from "./print";
+import { configurePrint, installPrintStyles, markSplittable, standaloneHtml, updatePrintView } from "./print";
 
 describe("standaloneHtml", () => {
   it("样式完整内联，不依赖站点 CSS", () => {
@@ -37,6 +37,27 @@ describe("standaloneHtml", () => {
     const html = standaloneHtml("正文", "标题");
     expect(html).toContain("var(--wr-text");
     expect(html).toContain("var(--wr-border");
+  });
+
+  it("A4 横向写进 @page，屏幕纸面按纸张宽度铺", () => {
+    configurePrint({ paper: "a4-landscape", margin: "normal" });
+    try {
+      const html = standaloneHtml("# 标题", "标题");
+      expect(html).toContain("size: A4 landscape");
+      expect(html).toContain("width: 1122.5px"); // 297mm @ 96dpi
+    } finally {
+      configurePrint({ paper: "a4", margin: "normal" });
+    }
+  });
+
+  it("自适应在没有内容测量时回落纵向 A4", () => {
+    configurePrint({ paper: "auto", margin: "normal" });
+    try {
+      const html = standaloneHtml("# 标题", "标题");
+      expect(html).toContain("size: A4;");
+    } finally {
+      configurePrint({ paper: "a4", margin: "normal" });
+    }
   });
 });
 

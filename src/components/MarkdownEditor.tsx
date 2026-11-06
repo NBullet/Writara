@@ -8,7 +8,7 @@ import { refreshPreview as requestPreviewRefresh, setEditorOptions, setSourceMod
 export interface MarkdownEditorHandle {
   setDoc: (text: string) => void;
   focus: () => void;
-  goTo: (pos: number) => void;
+  goTo: (pos: number, options?: { align?: "start" | "center" }) => void;
   /** 选中一段并滚到视野中间，但不抢焦点（查找栏用）。 */
   selectRange: (from: number, to: number) => void;
   setSourceMode: (enabled: boolean) => void;
@@ -90,13 +90,14 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(
         focus() {
           viewRef.current?.focus();
         },
-        goTo(pos: number) {
+        goTo(pos: number, options?: { align?: "start" | "center" }) {
           const view = viewRef.current;
           if (!view) return;
           const target = Math.max(0, Math.min(pos, view.state.doc.length));
           view.dispatch({
             selection: { anchor: target },
-            effects: EditorView.scrollIntoView(target, { y: "center" }),
+            // 大纲 / 命令面板跳标题按「贴顶」对齐（Typora 同感）；跨文件搜索命中仍居中。
+            effects: EditorView.scrollIntoView(target, { y: options?.align ?? "start" }),
           });
           view.focus();
         },

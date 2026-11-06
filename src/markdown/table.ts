@@ -10,6 +10,46 @@ export interface TableGrid {
   percents: number[];
 }
 
+export interface CellRange {
+  from: number;
+  to: number;
+}
+
+/**
+ * 一行里每个单元格的源码区间。
+ *
+ * 空单元格（`|  |`）在语法树里**不会生成 TableCell 节点**：靠节点下标去取，
+ * 后面的单元格会整体左移（看起来像「串列」）。所以按真实的竖线切分，
+ * `\|` 视为单元格内容而不是分隔符；省略首尾竖线的写法也在这里统一。
+ */
+export function cellRanges(source: string, from: number, to: number): CellRange[] {
+  const text = source.slice(from, to);
+  const pipes: number[] = [];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "|") continue;
+    let slashes = 0;
+    for (let back = index - 1; back >= 0 && text[back] === "\\"; back -= 1) slashes += 1;
+    if (slashes % 2 === 0) pipes.push(from + index);
+  }
+
+  let start = from;
+  let end = to;
+  if (pipes.length > 0 && source.slice(from, pipes[0]!).trim() === "") {
+    start = pipes.shift()! + 1;
+  }
+  if (pipes.length > 0 && source.slice(pipes[pipes.length - 1]! + 1, to).trim() === "") {
+    end = pipes.pop()!;
+  }
+
+  const ranges: CellRange[] = [];
+  for (const pipe of pipes) {
+    ranges.push({ from: start, to: pipe });
+    start = pipe + 1;
+  }
+  ranges.push({ from: start, to: end });
+  return ranges;
+}
+
 /** 从 Lezer 的 Table 节点里取出单元格原文与对齐方式。 */
 export function readTable(source: string, table: SyntaxNode): TableGrid {
   const header = table.getChild("TableHeader");
@@ -18,7 +58,9 @@ export function readTable(source: string, table: SyntaxNode): TableGrid {
   const delimiter = table.getChildren("TableDelimiter")[0];
 
   const cellsOf = (node: SyntaxNode | null): string[] =>
-    node ? node.getChildren("TableCell").map((cell) => source.slice(cell.from, cell.to).trim()) : [];
+    node
+      ? cellRanges(source, node.from, node.to).map((range) => source.slice(range.from, range.to).trim())
+      : [];
 
   const head = cellsOf(header);
   const align = delimiter ? parseAlignment(source.slice(delimiter.from, delimiter.to)) : [];

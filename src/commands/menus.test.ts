@@ -8,6 +8,7 @@ const BASE: MenuState = {
   sourceMode: false,
   focusMode: false,
   typewriterMode: false,
+  paper: "a4",
   statusBar: true,
   style: "writara",
   lineEnding: "lf",
@@ -68,5 +69,42 @@ describe("最近文件 / 文件夹的菜单项", () => {
       type: "item",
       disabled: true,
     });
+  });
+});
+
+describe("版面菜单", () => {
+  const layoutMenu = (state: MenuState) =>
+    createMenus(state)
+      .find((menu) => menu.id === "view")
+      ?.items.find((entry) => entry.type === "submenu" && entry.id === "layout");
+
+  it("只有当前版面被勾选", () => {
+    const entry = layoutMenu({ ...BASE, paper: "auto" });
+    expect(entry?.type).toBe("submenu");
+    if (entry?.type !== "submenu") return;
+    const checked = entry.items.flatMap((item) =>
+      item.type === "item" && item.checked ? [item.id] : [],
+    );
+    expect(checked).toEqual(["layout-auto"]);
+  });
+
+  it("纵向 / 横向 / Letter 都能选", () => {
+    const entry = layoutMenu({ ...BASE, paper: "a4-landscape" });
+    if (entry?.type !== "submenu") throw new Error("缺少版面子菜单");
+    expect(entry.items.map((item) => (item.type === "item" ? item.id : ""))).toEqual(
+      expect.arrayContaining(["layout-a4", "layout-a4-landscape", "layout-auto", "layout-letter"]),
+    );
+  });
+});
+
+describe("按路径打开", () => {
+  const fileIds = (state: MenuState) =>
+    createMenus(state)
+      .find((menu) => menu.id === "file")
+      ?.items.flatMap((entry) => (entry.type === "separator" ? [] : [entry.id]));
+
+  it("只在桌面端出现", () => {
+    expect(fileIds({ ...BASE, desktop: true })).toContain("open-path");
+    expect(fileIds(BASE)).not.toContain("open-path");
   });
 });

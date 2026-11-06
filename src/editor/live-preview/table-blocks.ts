@@ -7,14 +7,21 @@ import type { SyntaxNode } from "@lezer/common";
 
 import { renderInlineMarkdown } from "../../markdown/render";
 import { sanitizeHtml } from "../../markdown/sanitize";
-import { readTable, type Alignment, type TableGrid } from "../../markdown/table";
+import { cellRanges, readTable, type Alignment, type TableGrid } from "../../markdown/table";
 import { setColumnWidths, tableAt, type TableTarget } from "../../markdown/table-edit";
+import { comboFromEvent } from "../../commands/menu";
+import { SHORTCUTS } from "../../commands/shortcuts";
+import { cellFormatMarkers, toggleCellWrap } from "../table-cell-format";
 import { runTableCommand, type TableCommand } from "../table-menu";
 import {
   activeTableCell,
+  closeActiveCellCaret,
+  setActiveCellCaret,
+  setActiveCellCommit,
   setActiveTableCell,
   setPendingTableCell,
   takePendingTableCell,
+  type ActiveCellCaret,
 } from "../table-focus";
 
 /**
@@ -101,37 +108,85 @@ function htmlFor(raw: string, grid: TableGrid): string | null {
 /**
  * 单元格区间。
  *
- * 空单元格（`|  |  |  |`）在语法树里**不会生成 TableCell 节点**，
- * 整行会短一截：不补的话渲染出来是一行没有格子的 <tr>，也点不进去。
- * 所以列数不够时改用「两个 `|` 之间」的区间，位置一样准。
+ * 空单元格（`|  |  |  |`）在语法树里**不会生成 TableCell 节点**，整行会短一截；
+ * 按节点取区间会让后面的格子左移。所以跟 `readTable` 一样按真实竖线切分。
  */
-function cellsOf(node: SyntaxNode | null, cols: number): CellRange[] {
+function cellsOf(source: string, node: SyntaxNode | null, cols: number): CellRange[] {
   if (!node) return [];
-  const cells = node.getChildren("TableCell").map((cell) => ({ from: cell.from, to: cell.to }));
-  if (cells.length >= cols) return cells.slice(0, cols);
-
-  const delimiters = node.getChildren("TableDelimiter");
-  if (delimiters.length >= cols + 1) {
-    return Array.from({ length: cols }, (_, index) => ({
-      from: delimiters[index]!.to,
-      to: delimiters[index + 1]!.from,
-    }));
-  }
-  return cells;
+  return cellRanges(source, node.from, node.to).slice(0, cols);
 }
 
 function columnsOf(grid: TableGrid): number {
   return Math.max(grid.header.length, grid.align.length, 1);
 }
 
+/** 单元格浮层里把 `<br>` 显示成换行；提交时再写回 `<br>`。 */
+const BREAK_RE = /<br\s*\/?>/gi;
+
+function cellEditorText(source: string): string {
+  return source.replace(BREAK_RE, "\n");
+}
+
+function cellSourceText(text: string): string {
+  return text.replace(/\r\n?/g, "\n").replace(/\n/g, "<br>");
+}
+
+/** 浮层里的光标偏移 → 源码偏移（换行在源码里是 4 个字符的 `<br>`）。 */
+function cellSourceOffset(text: string, offset: number): number {
+  return cellSourceText(text.slice(0, offset)).length;
+}
+
+interface CaretProbe {
+  caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  caretRangeFromPoint?: (x: number, y: number) => { startContainer: Node; startOffset: number } | null;
+}
+
+/**
+ * 点击落点在单元格纯文本里的偏移（`<br>` 记作一个换行）。
+ * 让浮层打开时光标就在鼠标点的位置，而不是永远跳到末尾。
+ */
+function caretOffsetAt(cell: HTMLElement, x: number, y: number): number | null {
+  const probe = cell.ownerDocument as unknown as CaretProbe;
+  let node: Node | null = null;
+  let offset = 0;
+  if (typeof probe.caretPositionFromPoint === "function") {
+    const point = probe.caretPositionFromPoint(x, y);
+    if (point) {
+      node = point.offsetNode;
+      offset = point.offset;
+    }
+  } else if (typeof probe.caretRangeFromPoint === "function") {
+    const range = probe.caretRangeFromPoint(x, y);
+    if (range) {
+      node = range.startContainer;
+      offset = range.startOffset;
+    }
+  }
+  if (!node || node.nodeType !== Node.TEXT_NODE || !cell.contains(node)) return null;
+
+  const walker = cell.ownerDocument.createTreeWalker(
+    cell,
+    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+  );
+  let total = 0;
+  while (walker.nextNode()) {
+    const current = walker.currentNode;
+    if (current === node) return total + offset;
+    if (current.nodeType === Node.TEXT_NODE) total += current.textContent?.length ?? 0;
+    else if ((current as Element).tagName === "BR") total += 1;
+  }
+  return null;
+}
+
 function metaOf(state: EditorState, node: SyntaxNode, grid: TableGrid): TableMeta {
   const cols = columnsOf(grid);
+  const source = state.doc.toString();
   return {
     from: node.from,
     to: node.to,
     source: state.doc.sliceString(node.from, node.to),
-    header: cellsOf(node.getChild("TableHeader"), cols),
-    rows: node.getChildren("TableRow").map((row) => cellsOf(row, cols)),
+    header: cellsOf(source, node.getChild("TableHeader"), cols),
+    rows: node.getChildren("TableRow").map((row) => cellsOf(source, row, cols)),
     align: grid.align,
   };
 }
@@ -212,13 +267,14 @@ function freshTarget(
   while (node && node.name !== "Table") node = node.parent;
   if (!node) return null;
 
-  const cols = columnsOf(readTable(view.state.doc.toString(), node));
-  const header = cellsOf(node.getChild("TableHeader"), cols);
-  const rows = node.getChildren("TableRow").map((row) => cellsOf(row, cols));
+  const source = view.state.doc.toString();
+  const cols = columnsOf(readTable(source, node));
+  const header = cellsOf(source, node.getChild("TableHeader"), cols);
+  const rows = node.getChildren("TableRow").map((row) => cellsOf(source, row, cols));
   const cell = rowIndex === 0 ? header[colIndex] : rows[rowIndex - 2]?.[colIndex];
   if (!cell) return null;
 
-  return tableAt(view.state.doc.toString(), node.from, node.to, cell.from);
+  return tableAt(source, node.from, node.to, cell.from);
 }
 
 interface TableToolbar {
@@ -497,7 +553,12 @@ class TableWidget extends WidgetType {
     });
     wrap.appendChild(toolbar.bar);
 
-    const beginEdit = (cellEl: HTMLTableCellElement, rowIndex: number, colIndex: number) => {
+    const beginEdit = (
+      cellEl: HTMLTableCellElement,
+      rowIndex: number,
+      colIndex: number,
+      point?: { x: number; y: number },
+    ) => {
       if (editing) {
         const changed = editing.commit();
         editing = null;
@@ -512,11 +573,15 @@ class TableWidget extends WidgetType {
       const lead = /^\s*/.exec(raw)?.[0] ?? "";
       const trail = /\s*$/.exec(raw)?.[0] ?? "";
       const body = raw.slice(lead.length, raw.length - trail.length);
+      const initial = cellEditorText(body);
+      // 点击位置要在覆盖输入框之前从渲染好的单元格里算出来。
+      const caret = point ? caretOffsetAt(cellEl, point.x, point.y) : null;
 
-      const input = document.createElement("input");
+      // 单元格内容可能带 `<br>`：用 textarea 显示成真正的多行，指针落在哪一行就编辑哪一行。
+      const input = document.createElement("textarea");
       input.className = "cm-md-cell-editor";
-      input.type = "text";
-      input.value = body;
+      input.value = initial;
+      input.rows = 1;
       input.spellcheck = false;
       input.setAttribute("aria-label", "编辑单元格");
 
@@ -528,20 +593,41 @@ class TableWidget extends WidgetType {
       input.style.width = `${Math.max(rect.width, 28)}px`;
       input.style.height = `${Math.max(rect.height, 22)}px`;
 
+      // 输入多行时浮层跟着长高，不要只显示第一行。
+      const fit = () => {
+        input.style.height = "auto";
+        input.style.height = `${Math.max(rect.height, input.scrollHeight + 2)}px`;
+      };
+      input.addEventListener("input", fit);
+
       let closed = false;
+      const token = {};
+      const contentFrom = range.from + lead.length;
+      const caretSnapshot = (): ActiveCellCaret => ({
+        contentFrom,
+        offset: cellSourceOffset(input.value, input.selectionStart ?? input.value.length),
+        docLength: view.state.doc.length,
+        at: Date.now(),
+        live: false,
+      });
       const close = () => {
         closed = true;
+        closeActiveCellCaret(token, caretSnapshot);
         input.remove();
       };
 
       const commit = (): boolean => {
         if (closed) return false;
         const next = input.value;
-        close();
-        if (next === body) return false;
-        // 竖线必须转义，否则这一格会被切成两格
-        const insert = `${lead}${next.replace(/\|/g, "\\|")}${trail}`;
+        if (next === initial) {
+          close();
+          return false;
+        }
+        // 换行在单元格里只能写成 <br>；竖线必须转义，否则这一格会被切成两格。
+        const insert = `${lead}${cellSourceText(next).replace(/\|/g, "\\|")}${trail}`;
+        // 先写回文档再收尾：闭合快照里的 docLength 必须是提交后的长度。
         view.dispatch({ changes: { from: range.from, to: range.to, insert } });
+        close();
         return true;
       };
 
@@ -554,14 +640,50 @@ class TableWidget extends WidgetType {
       input.addEventListener("mousedown", (event) => event.stopPropagation());
       input.addEventListener("blur", () => {
         if (closed) return;
-        commit();
-        editing = null;
+        // 焦点切换可能正处在 CodeMirror 的更新周期里（textarea 失焦会撞上
+        // "Calls to EditorView.update are not allowed while an update is in progress"）。
+        // 推到更新周期之外再提交；期间如果已被别的路径提交/取消，closed 会拦住。
+        window.setTimeout(() => {
+          if (closed || !input.isConnected) return;
+          commit();
+          editing = null;
+        }, 0);
       });
       input.addEventListener("keydown", (event) => {
         // 输入法组合期间的回车是「上屏」，不是「提交」
         if (event.isComposing) return;
+
+        // 行内格式就地处理：输入框拿不到编辑器那套全局快捷键；而且提交后
+        // 表格 widget 会重建，块级 replace 里也放不下光标（见 docs/focus-views.md）。
+        const command = SHORTCUTS[comboFromEvent(event)];
+        if (command) {
+          const start = input.selectionStart ?? input.value.length;
+          const end = input.selectionEnd ?? start;
+          const format = cellFormatMarkers(command, input.value.slice(start, end));
+          if (format) {
+            event.preventDefault();
+            event.stopPropagation();
+            const next = toggleCellWrap({ value: input.value, start, end }, format);
+            input.value = next.value;
+            input.setSelectionRange(next.start, next.end);
+            return;
+          }
+        }
+
         // 浮层在 widget 里，事件会一路冒到编辑器；别让编辑器的键位再解释一次
         event.stopPropagation();
+
+        // Shift+Enter：浮层里插入一个真正的换行（提交时写回 `<br>`）。
+        // 单元格在 Markdown 里必须保持一行，所以不能直接敲普通回车；Enter 仍是提交。
+        if (event.key === "Enter" && event.shiftKey) {
+          event.preventDefault();
+          const start = input.selectionStart ?? input.value.length;
+          const end = input.selectionEnd ?? start;
+          input.value = `${input.value.slice(0, start)}\n${input.value.slice(end)}`;
+          input.setSelectionRange(start + 1, start + 1);
+          fit();
+          return;
+        }
 
         if (event.key === "Enter") {
           event.preventDefault();
@@ -626,8 +748,21 @@ class TableWidget extends WidgetType {
 
       wrap.appendChild(input);
       editing = { commit, cancel };
+      setActiveCellCommit(commit, token);
+      setActiveCellCaret(
+        () => ({
+          contentFrom,
+          offset: cellSourceOffset(input.value, input.selectionStart ?? input.value.length),
+          docLength: view.state.doc.length,
+          at: Date.now(),
+          live: true,
+        }),
+        token,
+      );
       input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
+      fit();
+      const at = caret === null ? input.value.length : Math.min(caret, input.value.length);
+      input.setSelectionRange(at, at);
     };
 
     wrap.addEventListener("mousedown", (event) => {
@@ -637,7 +772,7 @@ class TableWidget extends WidgetType {
       event.stopPropagation();
       toolbar.remember(hit.rowIndex, hit.colIndex);
       toolbar.sync();
-      beginEdit(hit.cell, hit.rowIndex, hit.colIndex);
+      beginEdit(hit.cell, hit.rowIndex, hit.colIndex, { x: event.clientX, y: event.clientY });
     });
 
     // 右键菜单要靠记住的单元格定位（widget 里 posAtCoords 只能给出块起点）

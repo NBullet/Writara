@@ -46,6 +46,48 @@ describe("collectEdits", () => {
     expect(hiddenText(doc, edits)).toContain("## ");
   });
 
+  it("标题没有空行时才补上间距", () => {
+    const tight = analyze("正文\n## 标题");
+    expect(
+      tight.edits.some((edit) => edit.kind === "line" && edit.cls.includes("cm-md-heading-tight")),
+    ).toBe(true);
+
+    const loose = analyze("正文\n\n## 标题");
+    expect(
+      loose.edits.some((edit) => edit.kind === "line" && edit.cls.includes("cm-md-heading-tight")),
+    ).toBe(false);
+  });
+
+  it("列表首行带悬挂缩进，第二项起带项间距", () => {
+    const bullets = analyze("- 一\n- 二\n").edits.filter((edit) => edit.kind === "line");
+    expect(bullets.filter((edit) => edit.cls.includes("cm-md-list-line"))).toHaveLength(2);
+    expect(bullets.filter((edit) => edit.cls.includes("cm-md-list-gap"))).toHaveLength(1);
+
+    const ordered = analyze("1. 一\n2. 二\n").edits.filter((edit) => edit.kind === "line");
+    expect(ordered.some((edit) => edit.cls.includes("cm-md-list-ordered"))).toBe(true);
+
+    const numbers = analyze("1. 一\n2. 二\n").edits.filter((edit) => edit.kind === "number");
+    expect(numbers.map((edit) => edit.text)).toEqual(["1.", "2."]);
+  });
+
+  it("标题后面的空行折叠，光标进入时恢复", () => {
+    const source = "## 标题\n\n正文";
+    const blank = source.indexOf("\n\n") + 1;
+    const gap = (edits: LiveEdit[]) =>
+      edits.filter((edit) => edit.kind === "line" && edit.cls.includes("cm-md-gap-after-heading"));
+
+    expect(gap(analyze(source).edits)).toHaveLength(1);
+    expect(gap(analyze(source, blank).edits)).toHaveLength(0);
+  });
+
+  it("引用里的列表同时带引用与列表两类", () => {
+    const classes = analyze("> 1. 一\n> 2. 二\n").edits
+      .filter((edit) => edit.kind === "line")
+      .flatMap((edit) => edit.cls.split(/\s+/));
+    expect(classes).toContain("cm-md-quote");
+    expect(classes).toContain("cm-md-list-line");
+  });
+
   it("链接只隐藏标记与地址，保留链接文字", () => {
     const { doc, edits } = analyze("见 [文档](https://example.com) 一节");
     expect(hiddenText(doc, edits)).toEqual(["[", "]", "(", "https://example.com", ")"]);
@@ -133,7 +175,7 @@ describe("collectEdits", () => {
     const source = "- 第一项\n- 第二项\n";
     const { doc, edits } = analyze(source);
     const bullets = edits.filter((edit) => edit.kind === "bullet");
-    expect(bullets.map((edit) => doc.sliceString(edit.from, edit.to))).toEqual(["-", "-"]);
+    expect(bullets.map((edit) => doc.sliceString(edit.from, edit.to))).toEqual(["- ", "- "]);
     expect(bullets.map((edit) => (edit.kind === "bullet" ? edit.depth : -1))).toEqual([0, 0]);
 
     // 光标在第一行：只有第二行的圆点还在

@@ -46,6 +46,7 @@ export const SHORTCUTS: Record<string, string> = {
   "Mod+n": "new",
   "Mod+Shift+n": "new-window",
   "Mod+o": "open",
+  "Mod+Shift+o": "open-path",
   "Mod+s": "save",
   "Mod+Shift+s": "save-as",
   "Mod+p": "palette",

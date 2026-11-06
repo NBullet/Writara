@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, shell } from "electron";
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { PDFDocument } from "pdf-lib";
+import { exportBaseName } from "./save-name";
 
 /**
  * pdf-lib 只在补 PDF 元数据时用到，但它是主进程里最大的一块依赖。
@@ -49,8 +50,7 @@ const FOOTER_TEMPLATE = `
 </div>`;
 
 function pdfName(name: string): string {
-  const base = name.replace(/\.(md|markdown|mdx|txt)$/i, "").trim() || "未命名";
-  return `${base}.pdf`;
+  return `${exportBaseName(name)}.pdf`;
 }
 
 /** 等字体与图片就绪：否则首份 PDF 会用回退字体、图表也可能还没画完。 */
@@ -131,22 +131,56 @@ export async function exportPdf(request: PdfExportRequest): Promise<{ path: stri
 }
 
 let previewWindow: BrowserWindow | null = null;
+let cleanedPreviews = false;
+
+const PREVIEW_PREFIX = "writara-preview-";
+const PREVIEW_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** 预览 PDF 交给系统阅读器后不会自己消失：每次预览前顺手清掉一天前的旧文件。 */
+async function cleanupPreviews(): Promise<void> {
+  const dir = app.getPath("temp");
+  const now = Date.now();
+  try {
+    for (const name of await fs.readdir(dir)) {
+      if (!name.startsWith(PREVIEW_PREFIX)) continue;
+      const file = path.join(dir, name);
+      try {
+        const stat = await fs.stat(file);
+        if (now - stat.mtimeMs > PREVIEW_MAX_AGE_MS) await fs.unlink(file);
+      } catch {
+        // 文件被阅读器占用时跳过，下次再清。
+      }
+    }
+  } catch {
+    // 临时目录读不了也不影响预览。
+  }
+}
 
 /**
  * 打印预览。
  *
- * Electron 不带 Chromium 的打印预览 UI，`window.print()` 只会弹系统对话框（没有预览）。
- * 所以桌面端先渲染成 PDF，再用内置阅读器打开：能看真实分页，也能在阅读器里直接打印。
+ * Electron 不带 Chromium 的打印预览 UI，所以桌面端先渲染成 PDF。
+ * **不再用内置 PDF 阅读器打开**：阅读器里的「打印」会拉起系统打印对话框，
+ * 某些打印机驱动（实测 SHARP 的 SR0E*.dll）会让 Electron 主进程直接崩溃
+ * （WER 0xc0000409 / BEX64）。改成交给系统默认阅读器，预览、打印、另存为
+ * 都在外部程序里完成，驱动出问题也只会带走那个阅读器，不会闪退 Writara。
  */
 export async function previewPdf(request: PdfExportRequest): Promise<{ path: string }> {
-  const tempPdf = path.join(app.getPath("temp"), `writara-preview-${randomUUID()}.pdf`);
+  const tempPdf = path.join(app.getPath("temp"), `${PREVIEW_PREFIX}${randomUUID()}.pdf`);
   await fs.writeFile(tempPdf, await renderPdf(request));
+  if (!cleanedPreviews) {
+    cleanedPreviews = true;
+    void cleanupPreviews();
+  }
 
+  const error = await shell.openPath(tempPdf).catch((cause) => String(cause));
+  if (!error) return { path: tempPdf };
+
+  // 没有可用的默认 PDF 阅读器时，退回内置预览窗口（只保证能看，打印仍有驱动风险）。
   previewWindow?.destroy();
+  const landscape = /@page\s*\{[^}]*\bsize:\s*[^;}]*landscape/i.test(request.html);
   const win = new BrowserWindow({
-    // 100% 缩放下 A4 是 793px 宽，再加阅读器自己的书签栏；
-    // 窗口窄了就会出现横向滚动条，看着比编辑器小一圈。
-    width: 1240,
+    width: landscape ? 1520 : 1240,
     height: 1180,
     minWidth: 520,
     minHeight: 480,
@@ -162,8 +196,7 @@ export async function previewPdf(request: PdfExportRequest): Promise<{ path: str
     if (previewWindow === win) previewWindow = null;
   });
 
-  // 用 100% 打开：预览窗口的「适应页面」会把 A4 缩到 ~88%，看着比编辑器小一圈，
-  // 让人误以为字号不一致。100% 下屏幕与纸面是同一个字号。
+  // 用 100% 打开：阅读器的「适应页面」会把 A4 缩到 ~88%，看着比编辑器小一圈。
   await win.loadURL(`${pathToFileURL(tempPdf).toString()}#zoom=100`);
   return { path: tempPdf };
 }

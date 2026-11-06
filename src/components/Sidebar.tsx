@@ -1,9 +1,12 @@
+// Lucian UX/UI Prompt #102 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#102
+// 文件树的视觉参考「Nested file tree」：加粗文件夹、缩进分支、选中项左侧强调条；
+// 这里只移植结构与动效，颜色全部映射到 Writara 的 --wr-* 主题变量。
 import { useEffect, useRef, useState } from "react";
 
 import type { OutlineItem } from "../markdown/outline";
 import type { WorkspaceController } from "../workspace/useWorkspace";
 import type { WorkspaceAsset, WorkspaceFile } from "../platform/types";
-import { assetKindOf } from "../workspace/assets";
+import { assetKindOf, extensionOf } from "../workspace/assets";
 import { buildFileTree, folderPathsOf, type TreeNode } from "../workspace/tree";
 import { MoreIcon, PencilIcon, PlusIcon, SearchIcon, TrashIcon, CloseIcon } from "./icons";
 
@@ -46,10 +49,10 @@ const TABS: Array<{ mode: SidebarMode; label: string; title: string }> = [
   { mode: "tree", label: "文件树", title: "文件树 (Ctrl+Shift+3)" },
 ];
 
-const INDENT = 14;
+const INDENT = 16;
 const MIN_WIDTH = 200;
-const MAX_WIDTH = 360;
-const DEFAULT_WIDTH = 240;
+const MAX_WIDTH = 380;
+const DEFAULT_WIDTH = 260;
 const WIDTH_KEY = "writara:sidebar-width";
 
 function initialWidth(): number {
@@ -75,24 +78,22 @@ function Chevron({ open }: { open: boolean }) {
     <svg
       className={open ? "wr-tree-chevron is-open" : "wr-tree-chevron"}
       viewBox="0 0 12 12"
-      width="12"
-      height="12"
+      width="13"
+      height="13"
       aria-hidden="true"
     >
-      <path d="M4.5 2.5 L8 6 L4.5 9.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 2.5 L8 6 L4.5 9.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
 function FolderIcon() {
   return (
-    <svg className="wr-tree-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <svg className="wr-tree-icon is-folder" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
       <path
-        d="M1.5 4.2c0-.5.4-.9.9-.9h3.3l1.3 1.5h6.6c.5 0 .9.4.9.9v6.4c0 .5-.4.9-.9.9H2.4a.9.9 0 0 1-.9-.9z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
+        d="M1.7 4.3c0-.7.6-1.3 1.3-1.3h3.1l1.4 1.6h5.5c.7 0 1.3.6 1.3 1.3v5.8c0 .7-.6 1.3-1.3 1.3H3c-.7 0-1.3-.6-1.3-1.3z"
+        fill="currentColor"
+        fillOpacity=".82"
       />
     </svg>
   );
@@ -100,43 +101,90 @@ function FolderIcon() {
 
 function FileIcon() {
   return (
-    <svg className="wr-tree-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <svg className="wr-tree-icon is-file" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
       <path
-        d="M3.5 2.2h5.2l3.8 3.8v7.8H3.5z"
+        d="M3.6 2.2h5.3l3.5 3.5v8.1H3.6z"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinejoin="round"
       />
-      <path d="M8.7 2.4v3.8h3.8" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M8.9 2.4v3.5h3.4" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M5.6 8.1h4.8M5.6 10.3h4.8" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity=".65" />
+    </svg>
+  );
+}
+
+function SheetIcon() {
+  return (
+    <svg className="wr-tree-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <rect x="2.4" y="3" width="11.2" height="10" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M2.6 6.2h10.8M2.6 9.3h10.8M6.3 3.2v9.6" fill="none" stroke="currentColor" strokeWidth="1.1" opacity=".7" />
+    </svg>
+  );
+}
+
+function SlidesIcon() {
+  return (
+    <svg className="wr-tree-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <rect x="2" y="3.2" width="12" height="8.2" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M8 11.6v1.6M5.6 13.4h4.8" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M8 6.2v2.6M8 8.8l2.1-1.3" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CodeIcon() {
+  return (
+    <svg className="wr-tree-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path
+        d="M5.6 5.2 2.8 8l2.8 2.8M10.4 5.2 13.2 8l-2.8 2.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ArchiveIcon() {
+  return (
+    <svg className="wr-tree-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <rect x="2.2" y="3" width="11.6" height="10" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M2.4 5.6h11.2" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M8 5.8v1.4M8 8.2v1.2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MediaIcon() {
+  return (
+    <svg className="wr-tree-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="2" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M6.6 6.1v3.8l3.2-1.9z" fill="currentColor" opacity=".85" />
     </svg>
   );
 }
 
 function AssetIcon({ name }: { name: string }) {
-  const kind = assetKindOf(name);
-  if (kind === "image") {
+  if (assetKindOf(name) === "image") {
     return (
-      <svg className="wr-tree-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <svg className="wr-tree-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
         <rect x="2" y="3" width="12" height="10" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
         <circle cx="6" cy="6.6" r="1.2" fill="currentColor" />
         <path d="M2.6 11.6 6.4 8.4l2.4 2 1.8-1.4 2.8 2.6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
       </svg>
     );
   }
-  if (kind === "attachment") {
-    return (
-      <svg className="wr-tree-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-        <path
-          d="M10.6 4.6 6 9.2a1.9 1.9 0 0 0 2.7 2.7l5-5a3.2 3.2 0 0 0-4.5-4.5L4 7.5a4.4 4.4 0 0 0 6.2 6.2l4-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinecap="round"
-        />
-      </svg>
-    );
-  }
+
+  const ext = extensionOf(name);
+  if (["xls", "xlsx", "csv"].includes(ext)) return <SheetIcon />;
+  if (["ppt", "pptx"].includes(ext)) return <SlidesIcon />;
+  if (["html", "htm", "css", "js", "ts", "json", "xml", "yml", "yaml"].includes(ext)) return <CodeIcon />;
+  if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) return <ArchiveIcon />;
+  if (["mp3", "wav", "m4a", "mp4", "mov", "webm"].includes(ext)) return <MediaIcon />;
   return <FileIcon />;
 }
 

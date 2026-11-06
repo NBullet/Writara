@@ -1,3 +1,4 @@
+import type { PaperSize } from "../export/page";
 import type { LineEnding } from "../io/line-endings";
 import type { StyleName } from "../storage/settings";
 import type { Menu, MenuItem } from "./menu";
@@ -13,6 +14,8 @@ export interface MenuState {
   sourceMode: boolean;
   focusMode: boolean;
   typewriterMode: boolean;
+  /** 当前版面：编辑区纸面与打印 / 导出共用。 */
+  paper: PaperSize;
   statusBar: boolean;
   style: StyleName;
   lineEnding: LineEnding;
@@ -34,6 +37,8 @@ export interface MenuState {
   pandocAvailable: boolean;
   /** 桌面端才有的在线更新；Web 版不显示这一项。 */
   updates?: boolean;
+  /** 桌面端才有的绝对路径操作（如「按路径打开」）。 */
+  desktop?: boolean;
   /** 当前工作区是否项目（有指令文件或清单）。 */
   isProject?: boolean;
   /** 右侧 AI 对话是否展开（菜单显示勾选状态）。 */
@@ -101,6 +106,7 @@ export function createMenus(state: MenuState): Menu[] {
           items: templateItems,
         },
         item("open", "打开…", "Mod+o"),
+        ...(state.desktop ? [item("open-path", "按路径打开…", "Mod+Shift+o")] : []),
         item("open-folder", "打开文件夹…"),
         item("new-project", "新建项目…"),
         {
@@ -388,6 +394,18 @@ export function createMenus(state: MenuState): Menu[] {
         item("source-mode", "源代码模式", "Mod+Slash", state.sourceMode),
         item("focus-mode", "专注模式", "F8", state.focusMode),
         item("typewriter-mode", "打字机模式", "F9", state.typewriterMode),
+        {
+          type: "submenu",
+          id: "layout",
+          label: "版面",
+          items: [
+            item("layout-a4", "A4 纵向", undefined, state.paper === "a4"),
+            item("layout-a4-landscape", "A4 横向", undefined, state.paper === "a4-landscape"),
+            item("layout-auto", "自适应", undefined, state.paper === "auto"),
+            separator,
+            item("layout-letter", "Letter", undefined, state.paper === "letter"),
+          ],
+        },
         separator,
         item("status-bar", "显示状态栏", undefined, state.statusBar),
         item("fullscreen", "切换全屏", "F11"),
@@ -395,6 +413,8 @@ export function createMenus(state: MenuState): Menu[] {
         item("zoom-reset", "实际大小", "Mod+Shift+Digit9"),
         item("zoom-in", "放大", "Mod+Shift+Equal"),
         item("zoom-out", "缩小", "Mod+Shift+Minus"),
+        separator,
+        item("reload-ui", "重新加载界面", "F5"),
       ],
     },
     {
@@ -415,6 +435,7 @@ export function createMenus(state: MenuState): Menu[] {
         item("help-about", "关于 Writara"),
         ...(state.updates === false ? [] : [item("check-update", "检查更新…")]),
         separator,
+        ...(state.desktop ? [item("open-logs", "打开日志文件夹")] : []),
         item("help-markdown", "Markdown 参考"),
       ],
     },

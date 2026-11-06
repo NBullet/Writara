@@ -123,6 +123,15 @@ export interface DesktopBridge {
     showItemInFolder(target: string): Promise<boolean>;
   };
 
+  /** 运行日志：界面白屏 / 卡死时用它排查（`userData/logs/writara.log`）。 */
+  logs: {
+    open(): Promise<boolean>;
+  };
+  /** 渲染进程的错误与最近操作；主进程统一落盘。 */
+  log(entry: { level?: "info" | "warn" | "error"; scope?: string; message: string; stack?: string }): void;
+  breadcrumb(label: string): void;
+  heartbeat(): void;
+
   menu: {
     updateState(state: Partial<MenuState>): Promise<boolean>;
   };

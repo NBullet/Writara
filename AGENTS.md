@@ -48,6 +48,17 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
 - `src/editor/live-preview/svg-blocks.ts` — `<svg>` 独立块 → 块级 widget（`StateField`）。
 - `src/editor/live-preview/table-blocks.ts` — 表格 → 真实表格。表格**常驻渲染态**，单元格编辑走
   叠在单元格上的输入框（`table-focus.ts` 记住当前格）；结构命令复用 `markdown/table-edit.ts`。
+  输入框里的格式键由 `editor/table-cell-format.ts` 处理（语义与 `toggleWrap` 一致）；全局快捷键
+  对输入框默认不抢键，只有 `CELL_SAFE_COMMANDS`（保存 / 查找 / 命令面板…）会先 `commitActiveCell()`
+  再执行。新增行内格式命令要同时进 `EDITOR_COMMANDS` 与 `cellFormatMarkers`。
+  单元格浮层是 textarea：已有的 `<br>` 打开时显示成多行，Shift+Enter 插入换行、提交时写回 `<br>`，
+  Enter 仍是提交；点击单元格时 `caretOffsetAt()` 把落点换算成浮层光标偏移（`<br>` 记作一个换行），
+  不要退回单行 input。失焦提交必须推迟出 CodeMirror 的更新周期（`setTimeout(0)`），
+  否则会抛 "Calls to EditorView.update are not allowed while an update is in progress"。
+  打印 / 导出按行内 HTML 渲染，`<br>` 在清洗白名单里。
+  有序 / 无序列表同理只能写成一行行内 HTML：`<ul><li>…</li></ul>` / `<ol><li>…</li></ol>`；
+  单元格内的 `ul/ol` 在编辑器与打印端都收紧了 margin / padding（见 theme.ts 与 printStyles.ts），
+  不要再让它们继承正文列表的整块间距。
   只有程序化把选区送进表内（搜索跳转、逐字选择）时才退回源码——块级 replace 里放不下光标。
 - `src/editor/live-preview/toc-blocks.ts` — `[TOC]` → 可点击目录。
 - `src/editor/live-preview/mermaid-blocks.ts` — ```mermaid → 图表；阅读态是图，光标在块内时是
@@ -133,6 +144,10 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
   （写错 id 不报错，只会静默回落到默认样式）。
 - `electron/pdf.ts` — 隐藏窗口 + `printToPDF`（页脚页码由 `footerTemplate` 提供，标题生成书签）；
   导出后用 pdf-lib 补作者/主题/生成器元数据。
+  **打印预览不再用内置 PDF 阅读器**：生成 PDF 后交给系统默认阅读器（`shell.openPath`），
+  旧预览文件超过 24 小时清理。内置阅读器的「打印」会拉起系统打印对话框，某些打印机驱动
+  （实测 SHARP `SR0E*.dll`）会让 Electron 主进程以 0xc0000409 / BEX64 直接崩溃；
+  没有默认阅读器时才退回内置窗口。
 - **主进程构建**：`vite.electron.config.ts` 必须保留 `ssr.noExternal: true`。SSR 构建默认把依赖当
   external，而安装包里没有 `node_modules`，漏掉它会在打包后启动时直接找不到模块。
 - `src/export/print.ts` — 打印区、`beforeprint`、分页测量、单文件 HTML 导出。
@@ -145,7 +160,7 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
 - `src/export/png.ts` — 按 A4 版面导出 PNG（html-to-image，按需加载）。
 - `src/export/katexFonts.ts` — 20 个 KaTeX woff2 转 data URL，只在导出时加载。
 - `src/export/resolve-images.ts` — 打印前把相对路径图片换成解析后的地址。
-- `src/export/page.ts` — 纸张与页边距预设。
+- `src/export/page.ts` — 纸张与页边距预设（A4 纵向 / A4 横向 / 自适应 / Letter）与编辑器纸面变量。
 - `src/export/printStyles.ts` — 打印样式表（TS 字符串）。
 - `src/workspace/` — 文件夹工作区：扫描、句柄持久化、打开/新建/重命名/删除。
 - `src/components/CommandPalette.tsx` / `SearchDialog.tsx` — 命令面板与跨文件搜索。
@@ -190,7 +205,10 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
   不要在这里做扫描，规则只在 `antislop.ts` 一份。
 - `src/ai/useAi.ts` — 单步动作：动作 id → 任务文本 → `runAgentTask` → 审阅浮层
   （source = 当前全文，output = agent 改后的全文）→ 一次 dispatch 写回。没有流式：CLI 运行期间
-  只显示阶段；结果仍是 diff 审阅。
+  只显示阶段；结果仍是 diff 审阅。**续写例外**：只让 agent 在回复里给出续写文字（不写文件），
+  浮层按钮是「插入」，按真实光标插一次 dispatch；表格单元格会先 `commitActiveCell()`，再用
+  `activeCellCaret()`（单元格内容起点 + 输入框内偏移）定位，失焦后 30 秒内的快照也有效
+  （文档长度变了就作废）。单元格里插入前把换行换成空格、`|` 转义，避免拆行 / 多一格。
 - `src/ai/useChat.ts` + `components/ChatPanel.tsx` — 右侧 AI 对话（可折叠，状态存
   `localStorage: writara:chat-open`）。同样只走 agent；结果与原文比对后 `minimalChange` 找最小变化段、
   一次 dispatch 写回。对话面板**底部**有模型切换器，列表来自当前 agent（`ai:models`），切模型写
@@ -247,6 +265,9 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
 - `src/markdown/table-edit.ts` — 表格的结构化编辑，**纯文本变换**（`TableTarget` → `TableChange`），
   不碰 DOM 也不碰 CodeMirror，方便单测；`src/editor/table-menu.ts` 负责定位表格（选区优先，
   渲染态表格的点击由 widget 映射到单元格）并把命令 dispatch 回编辑器。
+  **空单元格在 Lezer 里没有 TableCell 节点**：取单元格文本 / 区间 / 列号一律走
+  `table.ts` 的 `cellRanges()`（按真实竖线切分，`\|` 不算分隔符），不要再按
+  `getChildren("TableCell")` 的下标去排——中间空一格会让后面的列整体左移（串列）。
   新增表格命令只加一个 case + 一个测试，不要在菜单里手写字符串拼接。
   **列宽用分隔行的横线数量编码**（`| --- | ------- |` 表示第二列更宽）：GFM 允许任意数量的 `-`，
   这是唯一不需要往文件里塞私有元数据的存法；`setColumnWidths()` 负责换算，打印端据此输出
@@ -280,6 +301,18 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
   部分 Windows 机器上 GPU 沙箱初始化要二十多秒（`dom-ready` 迟迟不来，窗口全白）；
   开窗 5 秒还没 `dom-ready` 就写 `userData/gpu-fallback.json`，下次启动加 `--disable-gpu-sandbox`。
   只降级 GPU 进程，渲染进程仍 `sandbox: true`。
+- `electron/app-log.ts` — 运行日志 `userData/logs/writara.log`（超过 2MB 轮转为 `writara.log.1`，
+  只留一份旧档）。**白屏 / 卡死先看它**：主进程 `uncaughtException` / `unhandledRejection`、
+  渲染进程的 `window.onerror` / 未处理 Promise / React 渲染错误、Chromium 的 console.warn/error、
+  `render-process-gone`、页面加载失败，以及**心跳停止**都写在这里。
+  心跳由 `src/logging/report.ts` 在 React 之前装好（每 2s 一次）；窗口可见且聚焦时 15s 没有心跳
+  就判定界面卡死，写日志并弹「重新加载 / 继续等待」。`render-process-gone` 不再直接销毁窗口，
+  而是给一次重载机会。`src/components/ErrorBoundary.tsx` 把渲染期异常换成可复制 / 可重载的面板，
+  不再整树卸载成白屏；F5 / Ctrl+R 在 React 之外也能重载。菜单「帮助 → 打开日志文件夹」。
+  GPU 进程崩溃（`child-process-gone` type=GPU）也写日志并提示「重新加载界面」：渲染进程还活着、
+  心跳正常，但合成器可能再也画不出东西，表现同样是整片纯白。退出过程中不弹这些提示（`quitting`）。
+  输入法异常也进同一份日志：`create-editor.ts` 在组合提交 / 全角标点插入后检查光标是否落在
+  刚输入的字符前面，异常时写 `[renderer/*/ime] 输入后光标回退…`（附光标附近文本）。
 - `electron/updater.ts` — 在线更新（GitHub Releases）。`electron-updater` 用 `import()` 按需加载，
   启动 8 秒后才检查，不占启动时间；`autoDownload = false`，下载 / 重启安装都由用户点。
   `app-update.yml` 由 electron-builder 生成（`publish.owner = NBullet` / `repo = Writara`，
@@ -347,6 +380,11 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
   祖先目录用 `workspace/tree.ts` 的 `folderPathsOf()`，不要在组件里再拆一遍路径。
 - 打开文件后自动把它所在的目录设为工作区（`workspace.openAt`，不弹对话框）；文件本来就在当前
   工作区里时保持原根目录不动。这样「打开单个文件」也能立刻看到同级目录的 Markdown。
+  **启动时必须等 `workspace.restoring` 结束再判断**：会话恢复会先打开文档，抢跑会把用户选好的
+  高层级根目录覆盖成文件父目录（`useWorkspace` 的恢复 effect 结束才把 restoring 置 false）。
+- 侧栏文件树视觉参考 Lucian UX/UI Prompt #102（MIT）：加粗文件夹、16px 图标、30px 行高、
+  选中项左侧强调条。字号 / 行高用 `--wr-sidebar-fz` / `--wr-sidebar-row`，颜色只引用 `--wr-*`
+  或 `color-mix(...)`；文件行比文件夹弱一档（混入 `--wr-surface`），不要在组件里写死颜色。
 - 主题只覆盖 CSS 变量（`data-style`）。打印样式**必须**用 `var(--wr-*, 回退值)`，
   不能写死颜色；导出时 `theme-vars.ts` 会把当前主题变量内联进单文件 HTML。
 - 菜单里新增命令的 id 同时用于命令面板；`createMenus` 对新增字段要做空值兜底，
@@ -362,6 +400,13 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
 - Mermaid 必须先 `parse` 再 `render`，并保持 `suppressErrorRendering: true`。
   否则语法错误时 mermaid 会往 `document.body` 插一张巨大的错误图，直接把布局撑坏。
 - `--wr-bg` 是文档与打印的颜色（默认纯白），外壳（顶栏/侧栏/状态栏）用 `--wr-surface`。
+- `--wr-desk` 是编辑区四周的桌面色：`.cm-scroller` 只用它铺底，纸面用 `--wr-bg` 铺一条
+  居中、宽度取 `--wr-page-width`（A4 210mm，栏宽更宽时跟着变宽），文字列按 `--wr-measure`
+  居中落在纸上——**不能**只按 `--wr-measure` 铺白，那样文字会贴着纸边，看起来像没有页边距。
+  `--wr-page-pad`（16mm）是屏幕上那张纸的左右边距，与 `export/page.ts` 的 A4 / normal 同值，
+  打印预览的 `.wr-sheet` 也用它。纸面不参与打印 / 导出（纸面永远是 `--wr-bg`），
+  所以桌面色可以比纸面暗，改它不会影响 PDF。
+  六个主题各自给了一份，新增主题必须一起给，否则会拿到默认那套暖灰。
 - ```mermaid 的 widget 是异步渲染：先插占位，完成后 `view.requestMeasure()`；
   主题切换靠 `refreshPreviewEffect` 触发重建，否则旧配色会一直留着。
 - 相对路径图片依赖模块级解析器：App 里**先** `setImageResolver`，**再**同步文档，
@@ -372,6 +417,11 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
 
 - `Ctrl+S` 必须写回原文件。只有浏览器没有 File System Access 时才退化成「下载副本」，
   并在提示条说明差别。
+- 「文件 → 按路径打开…」(`open-path` / `Ctrl+Shift+O`) 是系统对话框的兜底：从聊天 / 代码宿主
+  复制来的 `E:/a/b.md`、带引号或零宽空格的路径先由 `io/open-path.ts` 清洗，再走
+  `restoreAccess` → `openPath`。原生对话框的 `defaultPath` 必须是**真实存在的目录 + 平台分隔符**
+  （Windows 会把 `E:/a` 当文件名并退回「文档」），统一由 `electron/ipc-fs.ts` 的
+  `dialogStartDir()` 处理；保存框的初始名走 `electron/save-name.ts`，不要直接拼路径。
 - 保存前先读磁盘，内容与 `savedText` 不一致就先 `confirm`，**不允许静默覆盖**别处的修改。
 - `requestPermission` 只能在用户手势里调用（Ctrl+S / 点击保存）；不要在挂载时申请。
 - 文件级自动保存（`autoSaveFile`）只在 `hasWritePermission` 已为 `granted` 时写盘，**绝不弹权限框**；
@@ -421,10 +471,16 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
   新增语言别名在 `highlight.ts` 的 `resolved` 里映射（如 `asm` → `x86asm`）。
 - 查找高亮走 `findHighlightField`（StateField）；查找匹配逻辑在 `find.ts`，不要在组件里重写。
 - 段落之间没有 margin：编辑器里两段之间的**那一行空行**就是段间距（打印端给等值的 margin 对齐）。
-  标题不再用 `padding-top` 撑开上方空白（空行已经给了），只给 `padding-bottom`；
-  数值全部来自 tokens.css 的排版基准。**不要**在 `.cm-line` 上用垂直 margin：
+  标题默认只给 `padding-bottom`（空行已经给了上方空白）；**没有空行**时由 `analyze` 加
+  `.cm-md-heading-tight`，用 `padding-top` 补 `--wr-heading-top`，打印端对应 `.wr-tight` 的 margin-top。
+  有空行时绝不加，否则会叠成两倍。数值全部来自 tokens.css 的排版基准。**不要**在 `.cm-line` 上用垂直 margin：
   CodeMirror 的高度表只量 `offsetHeight`，margin 不计入，会让 `posAtCoords` 整体偏移——表现就是
   「点这里，光标跑到上一行/下一行」。同理，块级 widget（TOC 等）也只用 padding 做纵向间距。
+- 列表：首行用 `cm-md-list-line` / `cm-md-list-ordered` 做悬挂缩进（数字/圆点是固定宽度 widget），
+  第二项起加 `cm-md-list-gap`；打印端对应 `ul > li` 的 padding 与 `li + li` 的 margin。
+  整组列表还要缩进到正文内侧（圆点不悬在左边距外）：编辑器把 `--wr-list-offset` 加在行的 padding 上，
+  打印加在 `ul` / `ol` 上，嵌套列表不再叠加这份偏移。两边同值由 `consistency.test.ts` 守住。
+  行类要经过 `analyze` 的 `addLineClass` 合并——同一行可能同时是引用和列表，CodeMirror 不会帮你合并 class。
 - 代码块/围栏行的行盒高度必须与正文一致（`calc(var(--wr-font-size) * var(--wr-lh))`）。CodeMirror 会挑一条
   「纯 ASCII 且较短」的行量化 `lineHeight`，再用它估算所有未渲染行；代码块比正文矮时全局估算会被拉低，
   滚到代码块总高度突然收缩、滚动位置被钳制，表现就是「滚下去又被缩回来」。
@@ -481,19 +537,39 @@ Slogan：Write naturally, render instantly. 自然书写，即刻呈现。
   颜色与字形（链接下划线、高亮底色、代码内边距、复选框字体、列表符号、emoji）两边必须一致。
   `src/styles/consistency.test.ts` 会把两边逐项比对，**任何一边改了另一边没跟上，测试直接红**——
   这类「屏幕上和 PDF 不一样」的问题不允许再靠肉眼发现。
-  - 编辑器里「两段之间的空行」就是段间距本身，所以打印端给同样的 margin；`.wr-gap`（渲染器加的 class）
-    负责把「标题与下一块之间的空行」也补上，否则屏幕上标题下有空行、纸面上没有。
+  - 编辑器里「两段之间的空行」就是段间距本身，打印端不另加；**标题后面的空行**在两边都不产生
+    额外高度：编辑器由 `analyze` 给该空行加 `.cm-md-gap-after-heading`（高度 0，光标进入时恢复），
+    打印没有空行元素，间距只由标题自己的 `margin-bottom`（`--head-gap`）提供。
+    不要再给「标题 + 下一块」套一个额外空行间距的 class。
   - 间距必须按**正文字号**折算（`--wr-font-size * 系数`），不能用 `em` 给标题设 margin：
     em 在标题上按标题字号放大，h1 的上下空白会变成 h3 的两倍——这就是之前「标题空得离谱」的根因。
-  - 字体分工：`--wr-font-prose`（正文，屏幕优先的无衬线）、`--wr-font-heading`（标题，衬线）、
-    `--wr-font-ui`（外壳）。编辑器标题与打印 `.wr-doc h1–h6` 都引用 heading，导出时由 `theme-vars.ts` 内联。
+  - 字体分工：`--wr-font-prose`（正文，Windows 上优先 Noto Sans SC——它是可变字体，600 有真正的
+    semibold；微软雅黑的 700 在 17px 下过黑）、`--wr-font-heading`（标题，默认与正文同一套无衬线、
+    600；中文衬线在 Windows 上容易掉到宋体，需要的主题自己覆盖这一项）、`--wr-font-ui`（外壳）。
+    加粗正文统一 600，不要用 700。
+    编辑器标题与打印 `.wr-doc h1–h6` 都引用 heading，导出时由 `theme-vars.ts` 内联。
     不要用 `-webkit-font-smoothing: antialiased`：Windows 上会关掉亚像素抗锯齿，正文会发虚。
 - 打印**不改字号**：`resolveLayout()` 只缩栏宽（`min(measure, 纸张可用宽)`），字号永远是编辑器那个值。
   A4 常规左右边距取 16mm，正好剩下 178mm ≈ 672px = 默认 42rem 栏宽，所以默认设置下纸面与屏幕逐字对齐。
   它同时把 `--wr-font-size` 覆盖成本文档的实际字号，间距随之一致缩放；结果进 `pageCss`，
   预览、PDF、导出 HTML 三处共用。
+- 版面三档（`src/export/page.ts`）：
+  - **A4 纵向 / A4 横向 / Letter**：纸张方向固定；编辑器纸面宽度写进 `--wr-page-width`
+    （横向 = `max(297mm, 栏宽 + 2 × 页边距)`）。**A4 横向的正文列也按纸宽走**
+    （`--wr-content-measure` 与 `resolveLayout()` 都取纸张正文宽，不再受栏宽限制），
+    纵向 / Letter 仍按「栏宽」居中。
+  - **自适应**：编辑器纸面铺满（`--wr-page-width: 100%`），正文列也铺满
+    （`--wr-content-measure: calc(100% - 2 × --wr-page-pad)`）；打印时 `resolveLayout()` 用整张纸的
+    正文宽，`print.ts` 的 `autoOrientation()` 按内容量一次宽表格（`max-content`）与公式行，
+    放不进纵向 A4 就换横向。方向必须先定再排版，所以它只测量、不写回。
+  - 屏幕纸面变量由 `applyPagePreview()` 在 `applySettings()` 里写，预览页与编辑器共用；不要在 CSS 里另写死。
+  - 版面是**编辑器设置**，不是导出的专属：设置放在「外观 → 版面」，命令入口是「视图 → 版面」
+    （`layout-a4` / `layout-a4-landscape` / `layout-auto` / `layout-letter`，由 `MenuState.paper` 勾选）。
 - PDF 预览窗口用 `#zoom=100` 打开：阅读器的「适应页面」会缩到 ~88%，看着比编辑器小一圈，
   会让人误以为字号不一致。窗口宽度也要够（1240），否则 100% 下出现横向滚动条。
+- 表格按「纸面密度」排版：`font-size: 0.9em`、`line-height: 1.5`、单元格 `0.42em 0.65em`，
+  与编辑器同一组值（`consistency.test.ts` 比对 padding）。多行单元格的内边距会成倍放大行高，
+  实测这篇 6 列多行表格从 3 页降到 2 页；不要为了“好看”单独把表格行高调大。
 - 分页策略：
   - 标题 + 紧随的块包在 `.wr-keep`（`break-inside: avoid`），避免页尾孤行。
     **表格不要进 `.wr-keep`**：整组不可分割时 Chrome 会丢掉 `thead` 的跨页重复，还会把行拆到两页。

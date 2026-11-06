@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AiActionEventDetail } from "../editor/ai-toolbar";
 import { AI_ACTION_EVENT } from "../editor/ai-toolbar";
+import { activeCellCaret, commitActiveCell } from "../editor/table-focus";
 import { clearSlopMarks, setSlopMarks } from "../editor/slop-marks";
 import type { AiReviewState } from "../components/AiReview";
 import { askConfirm } from "../components/confirm";
@@ -130,6 +131,8 @@ export function useAi({ getView, getDoc, outlinePrompt, getProjectDoc }: UseAiOp
       replaces: boolean;
       report?: boolean;
       range?: { from: number; to: number } | null;
+      /** 续写：只把 agent 回复里的文字插到这个位置，不整篇替换。 */
+      insertAt?: { pos: number; inCell?: boolean };
     }) => {
       const view = getView();
       if (!view) return;
@@ -170,6 +173,29 @@ export function useAi({ getView, getDoc, outlinePrompt, getProjectDoc }: UseAiOp
           });
           runRef.current = null;
           if (!result.ok) throw new Error(result.error || "Agent 运行失败");
+
+          // 续写：agent 只回文字，插到用户的光标处（表格单元格也算）。
+          if (options.insertAt) {
+            const { pos, inCell } = options.insertAt;
+            const raw = (result.message || "").trim();
+            // 表格单元格里不能出现换行与竖线，否则这一行会被拆开 / 多出一格。
+            const addition = inCell ? raw.replace(/\s*\n+\s*/g, " ").replace(/\|/g, "\\|") : raw;
+            if (!addition.trim()) {
+              setPanel((current) =>
+                current && current.status === "streaming"
+                  ? { ...current, status: "error", error: "Agent 没有返回续写内容" }
+                  : current,
+              );
+              return;
+            }
+            pendingRef.current = { from: pos, to: pos };
+            setPanel((current) =>
+              current
+                ? { ...current, status: "done", output: addition, source: "", stage: undefined }
+                : current,
+            );
+            return;
+          }
 
           if (options.report) {
             pendingRef.current = null;
@@ -249,12 +275,33 @@ export function useAi({ getView, getDoc, outlinePrompt, getProjectDoc }: UseAiOp
   const startContinue = useCallback(() => {
     const view = getView();
     if (!view) return;
-    const pos = view.state.selection.main.to;
-    const before = view.state.doc.sliceString(0, pos).slice(-1200);
+
+    // 表格单元格里真正的光标在浮层 input 上（编辑器选区停在块边界）：
+    // 先把这一格写回文档，再用「内容起点 + 输入框内偏移」算插入点。
+    const caret = activeCellCaret();
+    const usable =
+      caret !== null &&
+      (caret.live || (caret.docLength === view.state.doc.length && Date.now() - caret.at <= 30_000));
+
+    let pos: number;
+    let inCell = false;
+    if (caret && usable) {
+      pos = caret.contentFrom + caret.offset;
+      inCell = true;
+      // 输入框还开着时先写回；失焦提交过的规矩用快照。
+      if (caret.live) commitActiveCell();
+    } else {
+      pos = view.state.selection.main.to;
+    }
+
+    const doc = view.state.doc.toString();
+    const before = doc.slice(Math.max(0, pos - 1200), pos);
     execute({
       action: "continue",
-      task: `${taskForAction("continue")}\n\n【光标前的内容】\n${before}\n\n在文档末尾继续写，不要改动已有内容。`,
-      replaces: true,
+      task: `${taskForAction("continue")}\n\n【光标前的内容】\n${before}\n\n只把续写的文字写在回复里（Markdown），不要解释，不要修改任何文件。`,
+      replaces: false,
+      range: { from: pos, to: pos },
+      insertAt: { pos, inCell },
     });
   }, [execute, getView]);
 

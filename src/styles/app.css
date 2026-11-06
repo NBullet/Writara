@@ -1181,7 +1181,8 @@ body {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  background: var(--wr-bg);
+  /* 兜底底色：A4 正文列的那条纸面由编辑器自己铺（theme.ts 的 .cm-scroller）。 */
+  background: var(--wr-desk);
   overflow: hidden;
 }
 
@@ -1251,21 +1252,23 @@ body {
   min-height: 0;
   border-right: 1px solid var(--wr-border);
   background: var(--wr-surface);
-  font-size: 13px;
+  color: var(--wr-text);
+  font-family: var(--wr-font-ui);
+  font-size: var(--wr-sidebar-fz, 13.5px);
   position: relative;
 }
 
 /* 根节点是文件树的第一行（不再是单独的标题条）。 */
 .wr-tree-folder.is-root {
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
 
 .wr-tree-folder.is-root > .wr-tree-row-wrap .wr-tree-row {
-  height: 28px;
+  height: calc(var(--wr-sidebar-row, 30px) + 2px);
 }
 
 .wr-tree-folder.is-root > .wr-tree-row-wrap .wr-tree-name {
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .wr-sidebar-resizer {
@@ -1289,21 +1292,21 @@ body {
 .wr-tree-rename {
   flex: 1;
   min-width: 0;
-  padding: 2px 4px;
+  padding: 3px 6px;
   border: 1px solid var(--wr-accent);
-  border-radius: 4px;
+  border-radius: var(--wr-radius-sm, 5px);
   background: var(--wr-bg);
   color: var(--wr-text);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--wr-ui-fz-sm, 12.5px);
   outline: none;
 }
 
 .wr-sidebar-tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
+  gap: 6px;
+  padding: 9px 10px;
   border-bottom: 1px solid var(--wr-border);
 }
 
@@ -1313,8 +1316,8 @@ body {
   flex: 1;
   gap: 1px;
   padding: 2px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--wr-text) 4%, transparent);
+  border-radius: var(--wr-radius, 8px);
+  background: color-mix(in srgb, var(--wr-text) 5%, transparent);
 }
 
 .wr-sidebar-thumb {
@@ -1323,32 +1326,34 @@ body {
   bottom: 2px;
   left: 2px;
   width: calc(50% - 2.5px);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--wr-accent) 14%, transparent);
+  border-radius: var(--wr-radius-sm, 5px);
+  background: color-mix(in srgb, var(--wr-accent) 13%, var(--wr-bg));
+  box-shadow: var(--wr-shadow-float);
   pointer-events: none;
   transform: translateX(calc(var(--tab-index, 0) * (100% + 1px)));
-  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .wr-sidebar-tabs button {
   position: relative;
   z-index: 1;
   flex: 1;
-  padding: 3px 6px;
+  padding: 4px 8px;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--wr-radius-sm, 5px);
   background: none;
   color: var(--wr-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--wr-ui-fz-sm, 12.5px);
   white-space: nowrap;
   cursor: pointer;
-  transition: color 120ms ease;
+  transition: color 140ms ease;
 }
 
 .wr-sidebar-tabs button.is-active {
   background: transparent;
-  color: var(--wr-accent);
+  color: var(--wr-text);
+  font-weight: 600;
 }
 
 .wr-sidebar-tabs .wr-sidebar-search {
@@ -1389,21 +1394,33 @@ body {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  padding: 8px;
+  padding: 10px 10px 8px;
   overflow: hidden;
 }
 
 .wr-sidebar-filter {
   flex: none;
   width: 100%;
-  margin-bottom: 8px;
-  padding: 5px 8px;
-  border: 1px solid var(--wr-border);
-  border-radius: 6px;
+  height: 30px;
+  margin-bottom: 10px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--wr-border) 72%, transparent);
+  border-radius: var(--wr-radius, 8px);
   background: var(--wr-bg);
   color: var(--wr-text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--wr-ui-fz-sm, 12.5px);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.wr-sidebar-filter::placeholder {
+  color: var(--wr-muted);
+}
+
+.wr-sidebar-filter:focus {
+  outline: none;
+  border-color: var(--wr-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--wr-accent) 14%, transparent);
 }
 
 .wr-sidebar-body ul {
@@ -1423,8 +1440,8 @@ body {
 .wr-tree {
   flex: 1;
   min-height: 0;
-  margin: 0 -4px;
-  padding: 0 4px 8px;
+  margin: 0 -6px;
+  padding: 0 6px 12px;
   overflow-y: auto;
   user-select: none;
 }
@@ -1446,38 +1463,48 @@ body {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   min-width: 0;
-  height: 26px;
-  padding: 0 6px;
+  height: var(--wr-sidebar-row, 30px);
+  padding: 0 8px;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--wr-radius, 8px);
   background: none;
   color: var(--wr-text);
   font: inherit;
-  font-size: 12.5px;
+  font-size: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color 100ms ease, color 100ms ease;
+  transition: background-color 130ms ease, color 130ms ease, box-shadow 130ms ease;
 }
 
 .wr-tree-row:hover {
-  background: color-mix(in srgb, var(--wr-text) 7%, transparent);
+  background: color-mix(in srgb, var(--wr-text) 6%, transparent);
 }
 
 .wr-tree-row.is-active {
-  background: color-mix(in srgb, var(--wr-accent) 14%, transparent);
-  font-weight: 600;
+  background: color-mix(in srgb, var(--wr-accent) 12%, transparent);
+  box-shadow: inset 2px 0 var(--wr-accent);
+  font-weight: 500;
 }
 
-.wr-tree-row.is-active .wr-tree-icon {
+.wr-tree-row.is-active .wr-tree-icon,
+.wr-tree-row.is-active .wr-tree-name {
   color: var(--wr-accent);
+}
+
+.wr-tree-row.is-folder .wr-tree-name {
+  font-weight: 500;
+}
+
+.wr-tree-row.is-file .wr-tree-name {
+  color: color-mix(in srgb, var(--wr-text) 82%, var(--wr-surface));
 }
 
 .wr-tree-chevron {
   flex: none;
   color: var(--wr-muted);
-  transition: transform 120ms ease;
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .wr-tree-chevron.is-open {
@@ -1486,12 +1513,16 @@ body {
 
 .wr-tree-chevron-space {
   flex: none;
-  width: 12px;
+  width: 13px;
 }
 
 .wr-tree-icon {
   flex: none;
   color: var(--wr-muted);
+}
+
+.wr-tree-icon.is-folder {
+  color: color-mix(in srgb, var(--wr-text) 52%, var(--wr-surface));
 }
 
 .wr-tree-name {
@@ -1509,11 +1540,12 @@ body {
 .wr-tree-actions {
   display: none;
   flex: none;
-  gap: 1px;
-  padding-right: 2px;
+  gap: 2px;
+  padding-right: 4px;
 }
 
-.wr-tree-row-wrap:hover .wr-tree-actions {
+.wr-tree-row-wrap:hover .wr-tree-actions,
+.wr-tree-row-wrap:focus-within .wr-tree-actions {
   display: flex;
 }
 
@@ -1521,14 +1553,15 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--wr-radius-sm, 5px);
   background: none;
   color: var(--wr-muted);
   cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .wr-tree-actions button:hover {
@@ -2167,28 +2200,34 @@ body {
 .wr-outline-item {
   display: block;
   width: 100%;
-  padding: 4px 6px;
+  min-height: var(--wr-sidebar-row, 30px);
+  padding: 5px 9px;
   overflow: hidden;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--wr-radius, 8px);
   background: none;
   color: var(--wr-text);
   font: inherit;
-  line-height: 1.5;
+  font-size: inherit;
+  line-height: 1.45;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color 100ms ease, color 100ms ease;
+  transition: background-color 130ms ease, color 130ms ease;
 }
 
 .wr-outline-item:hover {
-  background: color-mix(in srgb, var(--wr-text) 7%, transparent);
+  background: color-mix(in srgb, var(--wr-text) 6%, transparent);
 }
 
-.wr-outline-item.lv2 { padding-left: 18px; }
-.wr-outline-item.lv3 { padding-left: 30px; }
-.wr-outline-item.lv4 { padding-left: 42px; }
+.wr-outline-item.lv1 {
+  font-weight: 500;
+}
+
+.wr-outline-item.lv2 { padding-left: 20px; }
+.wr-outline-item.lv3 { padding-left: 32px; }
+.wr-outline-item.lv4 { padding-left: 44px; }
 .wr-outline-item.lv5,
 .wr-outline-item.lv6 { padding-left: 54px; }
 
@@ -4381,4 +4420,51 @@ body {
 
 .wr-project-ai-review .wr-ai-diff {
   max-height: 46vh;
+}
+
+/* 渲染错误兜底面板：以前渲染期异常会让整棵树卸载，窗口只剩白底 */
+.wr-crash {
+  max-width: 640px;
+  margin: 12vh auto 0;
+  padding: var(--wr-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--wr-space-3);
+  color: var(--wr-text);
+  background: var(--wr-surface);
+  border: 1px solid var(--wr-border);
+  border-radius: var(--wr-radius-lg);
+  box-shadow: var(--wr-shadow-pop);
+}
+
+.wr-crash h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.wr-crash p {
+  margin: 0;
+  color: var(--wr-muted);
+  font-size: var(--wr-ui-fz);
+  line-height: 1.6;
+}
+
+.wr-crash pre {
+  max-height: 220px;
+  margin: 0;
+  padding: var(--wr-space-3);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--wr-font-mono, ui-monospace, monospace);
+  font-size: var(--wr-ui-fz-sm);
+  color: var(--wr-text);
+  background: var(--wr-code-bg);
+  border-radius: var(--wr-radius-sm);
+}
+
+.wr-crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wr-space-2);
 }

@@ -41,7 +41,6 @@ export interface PendingTableCell {
 }
 
 let pending: PendingTableCell | null = null;
-
 export function setPendingTableCell(
   tableFrom: number,
   rowIndex: number,
@@ -60,4 +59,70 @@ export function takePendingTableCell(tableFrom: number): PendingTableCell | null
   const value = pending;
   pending = null;
   return value;
+}
+
+/**
+ * 当前单元格输入框的提交函数。
+ *
+ * 保存 / 查找这类全局命令执行前要先落盘格子的内容；输入框在 widget 里，
+ * App 拿不到它的闭包，只能由输入框打开时登记、关闭时清掉。
+ */
+let activeCommit: (() => boolean) | null = null;
+let commitToken: object | null = null;
+
+export function setActiveCellCommit(commit: (() => boolean) | null, token: object = {}): void {
+  activeCommit = commit;
+  commitToken = commit ? token : null;
+}
+
+/** 把当前单元格的内容写回文档；没有正在编辑的格子时什么都不做。 */
+export function commitActiveCell(): boolean {
+  return activeCommit ? activeCommit() : false;
+}
+
+/**
+ * 当前单元格输入框里的光标（映射回文档位置）。
+ *
+ * AI 续写要在「用户以为的光标处」插入，但表格是块级 widget，编辑器选区停在块边界；
+ * 真正的光标在浮层 input 里。输入框打开时登记这个读取器，关闭时留一份短时快照
+ * （点系统菜单会让输入框失焦，此时 AI 命令才真正执行）。
+ */
+export interface ActiveCellCaret {
+  /** 单元格正文（去掉首尾空格）在文档里的起点。 */
+  contentFrom: number;
+  /** 输入框内部的偏移。 */
+  offset: number;
+  /** 记录时的文档长度；长度变了说明别处改过，位置不再可靠。 */
+  docLength: number;
+  /** 记录时间，只做短时兜底。 */
+  at: number;
+  /** 输入框是否还开着。 */
+  live: boolean;
+}
+
+let caretReader: (() => ActiveCellCaret | null) | null = null;
+let caretToken: object | null = null;
+
+export function setActiveCellCaret(reader: (() => ActiveCellCaret | null) | null, token: object): void {
+  caretReader = reader;
+  caretToken = token;
+}
+
+/**
+ * 输入框关闭：只有「当前登记的仍然是这一格」时才落快照。
+ * Tab 跳到下一格时新 widget 已经登记了新读取器，这里不能覆盖它。
+ */
+export function closeActiveCellCaret(token: object, snapshot: () => ActiveCellCaret): void {
+  if (commitToken === token) {
+    activeCommit = null;
+    commitToken = null;
+  }
+  if (caretToken !== token) return;
+  const value = snapshot();
+  caretReader = () => value;
+  caretToken = null;
+}
+
+export function activeCellCaret(): ActiveCellCaret | null {
+  return caretReader ? caretReader() : null;
 }

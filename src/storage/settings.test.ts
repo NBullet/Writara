@@ -69,6 +69,13 @@ describe("custom css", () => {
     expect(settings.autoSaveFile).toBe(true);
     expect(normalizeSettings({ autoSaveFile: false }).autoSaveFile).toBe(false);
   });
+
+  it("版面预设只认已知取值，旧的 a4 / letter 仍可用", () => {
+    expect(normalizeSettings({ paper: "a4-landscape" as never }).paper).toBe("a4-landscape");
+    expect(normalizeSettings({ paper: "auto" as never }).paper).toBe("auto");
+    expect(normalizeSettings({ paper: "letter" }).paper).toBe("letter");
+    expect(normalizeSettings({ paper: "b5" as never }).paper).toBe("a4");
+  });
 });
 
 describe("load / save", () => {

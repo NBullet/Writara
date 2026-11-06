@@ -1,7 +1,7 @@
 import { markdownLanguage } from "@codemirror/lang-markdown";
 import { describe, expect, it } from "vitest";
 
-import { columnPercents, parseAlignment, parseTableSize, readTable, splitRow } from "./table";
+import { cellRanges, columnPercents, parseAlignment, parseTableSize, readTable, splitRow } from "./table";
 
 function firstTable(source: string) {
   const tree = markdownLanguage.parser.parse(source);
@@ -26,6 +26,18 @@ describe("readTable", () => {
     expect(grid.align).toEqual(["left", "center", "right"]);
   });
 
+  it("中间的空单元格不会让后面的列左移", () => {
+    const grid = firstTable(
+      "| A | B | C |\n| --- | --- | --- |\n| 1 |  | 3 |\n|  | 2 | 3 |\n| 1 | 2 |  |",
+    );
+    expect(grid.header).toEqual(["A", "B", "C"]);
+    expect(grid.rows).toEqual([
+      ["1", "", "3"],
+      ["", "2", "3"],
+      ["1", "2", ""],
+    ]);
+  });
+
   it("没有对齐符号时为空字符串", () => {
     const grid = firstTable("| a | b |\n|---|---|\n| 1 | 2 |");
     expect(grid.align).toEqual(["", ""]);
@@ -44,7 +56,6 @@ describe("splitRow", () => {
     expect(splitRow("a \\| b | c")).toEqual(["a | b", "c"]);
     expect(splitRow("| a | b |")).toEqual(["a", "b"]);
   });
-
   it("空单元格补成同样列数（空行不会渲染成没有格子的 tr）", () => {
     const grid = firstTable("| A | B |\n| --- | --- |\n|  |  |\n| 1 | 2 |");
     expect(grid.rows[0]).toEqual(["", ""]);
@@ -65,6 +76,20 @@ describe("列宽（分隔行横线数）", () => {
   it("readTable 带上列宽", () => {
     const grid = firstTable("| a | b |\n| --- | ------- |\n| 1 | 2 |");
     expect(grid.percents).toEqual([30, 70]);
+  });
+});
+
+describe("cellRanges", () => {
+  const texts = (row: string) =>
+    cellRanges(row, 0, row.length).map((range) => row.slice(range.from, range.to).trim());
+
+  it("按真实竖线切分，空单元格占一个位置", () => {
+    expect(texts("| 1 |  | 3 |")).toEqual(["1", "", "3"]);
+    expect(texts("1 |  | 3")).toEqual(["1", "", "3"]);
+  });
+
+  it("\\| 不算分隔符", () => {
+    expect(texts("| a \\| b | c |")).toEqual(["a \\| b", "c"]);
   });
 });
 

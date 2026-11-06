@@ -32,12 +32,14 @@ export interface WorkspaceController {
   /** 根节点显示名：清单 title，缺省文件夹名。 */
   projectName: string;
   busy: boolean;
+  /** 正在恢复上次的工作区根目录；恢复完成前不要按「打开文件」去猜目录。 */
+  restoring: boolean;
   error: string | null;
   dismissError: () => void;
   needsPermission: boolean;
   openFolder: () => Promise<void>;
-  /** 打开指定目录作为工作区（不弹对话框，桌面端用）。 */
-  openAt: (dir: string) => Promise<void>;
+  /** 打开指定目录作为工作区（不弹对话框，桌面端用）。默认会记住为下次启动的根目录。 */
+  openAt: (dir: string, options?: { persist?: boolean }) => Promise<void>;
   /** 打开一个已经拿到授权的根目录（新建项目用）。返回是否成功。 */
   openRoot: (root: WorkspaceRoot) => Promise<boolean>;
   /** 重新读取清单（转为项目 / 外部改动后）。 */
@@ -65,6 +67,7 @@ export function useWorkspace(): WorkspaceController {
   const [project, setProject] = useState<ProjectState>(EMPTY_PROJECT);
   const [folders, setFolders] = useState<RecentFolder[]>([]);
   const [busy, setBusy] = useState(false);
+  const [restoring, setRestoring] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [needsPermission, setNeedsPermission] = useState(false);
 
@@ -124,22 +127,28 @@ export function useWorkspace(): WorkspaceController {
   }, []);
 
   // 恢复上次的文件夹；只有权限仍然有效时自动扫描。
+  // 恢复过程中 `restoring` 为 true：App 不能在这期间按当前文档去猜目录，
+  // 否则会把用户选好的高层级根目录覆盖成文件所在的父目录。
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const target = await loadWorkspaceRoot();
-      if (!target || cancelled) return;
+      try {
+        const target = await loadWorkspaceRoot();
+        if (!target || cancelled) return;
 
-      // 重启后主进程白名单为空：先把上次的目录重新登记，否则 scan 会被 assertAllowed 拦下
-      await platform().restoreRootAccess?.(target);
+        // 重启后主进程白名单为空：先把上次的目录重新登记，否则 scan 会被 assertAllowed 拦下
+        await platform().restoreRootAccess?.(target);
 
-      if (await platform().canAccessRoot(target)) {
-        await scan(target, { quiet: true });
-        return;
+        if (await platform().canAccessRoot(target)) {
+          await scan(target, { quiet: true });
+          return;
+        }
+
+        setRoot(target);
+        setNeedsPermission(true);
+      } finally {
+        if (!cancelled) setRestoring(false);
       }
-
-      setRoot(target);
-      setNeedsPermission(true);
     })();
 
     return () => {
@@ -170,13 +179,17 @@ export function useWorkspace(): WorkspaceController {
 
   /** 打开某个目录（打开文件后自动加载同级目录用），不弹对话框。 */
   const openAt = useCallback(
-    async (dir: string) => {
+    async (dir: string, options?: { persist?: boolean }) => {
       const target = platform().rootFromPath?.(dir);
       if (!target) return;
       try {
-        await saveWorkspaceRoot(target);
+        // 跟随文档猜出来的目录只是本次会话的工作区：不写回「上次根目录」，
+        // 也不进最近列表。否则打开一个外部文件会把用户选好的高层级目录覆盖掉。
+        if (options?.persist !== false) {
+          await saveWorkspaceRoot(target);
+          void remember(target);
+        }
         await scan(target);
-        void remember(target);
       } catch (cause) {
         setError(describeFileError(cause));
       }
@@ -336,6 +349,7 @@ export function useWorkspace(): WorkspaceController {
     isProject: project.isProject,
     projectName: project.manifest?.title ?? root?.name ?? "",
     busy,
+    restoring,
     error,
     dismissError,
     needsPermission,

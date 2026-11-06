@@ -2,6 +2,9 @@
   color-scheme: light dark;
 
   --wr-bg: #ffffff;
+  /* 编辑区四周的「桌面」底色：只用于屏幕画布，A4 正文列仍是 --wr-bg。
+     打印 / 导出不读它（纸面与正文同色），所以这里怎么暗都不影响 PDF。 */
+  --wr-desk: #ebe7de;
   --wr-surface: #f7f5f0;
   --wr-text: #26221d;
   --wr-muted: #8a8175;
@@ -13,10 +16,11 @@
   /* ==高亮== 的底色：编辑器与打印共用，避免一边黄一边主题色 */
   --wr-mark-bg: #f6e6b8b3;
 
-  --wr-font-prose: "Segoe UI", "PingFang SC", "Microsoft YaHei",
-    "Noto Sans SC", sans-serif;
-  --wr-font-heading: "Iowan Old Style", "Source Han Serif SC",
-    "Noto Serif SC", "Songti SC", Georgia, serif;
+  --wr-font-prose: "Segoe UI", "PingFang SC", "Noto Sans SC",
+    "Microsoft YaHei", sans-serif;
+  /* 标题与正文同一套无衬线：中文衬线在 Windows 上很容易掉到宋体，
+     Georgia / 宋体混排会比正文显旧。要衬线主题时只覆盖这个变量。 */
+  --wr-font-heading: var(--wr-font-prose);
   --wr-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
   --wr-font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas,
@@ -27,29 +31,56 @@
   --wr-radius: 8px;
 
   /*
+   * ── 屏幕上的纸面（A4）──────────────────────────────────────────────
+   * 编辑器里那条白色纸面按 A4 铺开，文字列（--wr-measure）居中放在上面，
+   * 两边露出来的就是页边距。默认值正好对上导出的 A4 / normal 页边距：
+   * 210mm - 16mm × 2 = 178mm ≈ 672px = 42rem 栏宽，所以默认设置下
+   * 屏幕上的纸面与打印预览是同一张纸、同一列字。
+   * 栏宽调到比 A4 正文还宽时纸面跟着变宽（max 里的第二项），
+   * 否则文字会跑到纸外去。
+   * 只影响屏幕：打印 / 导出的纸张与页边距仍由 export/page.ts 决定。
+   * 版面选「自适应」时这两项由 applyPagePreview 改成 100% / 铺满，
+   * 正文列宽改用 --wr-content-measure。
+   */
+  --wr-page-pad: 16mm;
+  --wr-page-width: max(210mm, calc(var(--wr-measure) + 2 * var(--wr-page-pad)));
+  --wr-content-measure: var(--wr-measure);
+
+  /*
    * ── 排版基准（唯一来源）──────────────────────────────────────────────
-   * 取 GitHub Markdown CSS（github-markdown-css / Primer）的标题阶梯与间距关系：
-   * 标题 2 / 1.5 / 1.25 / 1 / .875 / .85 em，标题与上文留一行、与下文贴紧。
-   * 只有两处按中文和「源码空行就是段距」的模型调整，其余不再各自发挥：
-   *   · 行高 1.7（上游 1.5）——中文需要更大的行距；
-   *   · 段间距 = 一行空行（1.7em，上游 16px）。编辑器里两段之间本来就是那条空行，
+   * 参考 OpenChamber / 现代文档排版：比 GitHub 那套更克制。
+   * 标题与正文同一套无衬线、600 字重，h1 不再拉到 2em。
+   * 标题与上文之间：源码有空行时由空行提供；没有空行时由 `--wr-heading-top`
+   * 补一个较小的间距（编辑器用 padding、打印用 margin，数值同源）。
+   * 只有两处按中文和「源码空行就是段距」的模型调整：
+   *   · 行高 1.7 —— 中文需要更大的行距；
+   *   · 段间距 = 一行空行（1.7em）。编辑器里两段之间本来就是那条空行，
    *     打印按同样的距离给 margin，于是屏幕与纸面天然一致。
    * 要改排版只改这一组值：编辑器主题与打印样式都只引用它们，不许另写 px。
    */
   --wr-lh: 1.7;
-  --wr-h1: 2;
-  --wr-h2: 1.5;
-  --wr-h3: 1.25;
+  --wr-h1: 1.5;
+  --wr-h2: 1.3;
+  --wr-h3: 1.12;
   --wr-h4: 1;
-  --wr-h5: 0.875;
-  --wr-h6: 0.85;
+  --wr-h5: 0.95;
+  --wr-h6: 0.9;
   --wr-heading-lh: 1.3;
   /* 标题与下段之间的间隔系数（按正文字号换算，不受标题自身字号影响） */
-  --wr-heading-ratio: 0.3;
+  --wr-heading-ratio: 0.9;
   --wr-heading-bottom: calc(var(--wr-font-size, 17px) * var(--wr-heading-ratio));
+  /* 没有空行时标题的上间距；h3 / h4-h6 在这个值上递减 */
+  --wr-heading-top: calc(var(--wr-font-size, 17px) * 0.8);
   --wr-code-scale: 0.9;
   --wr-code-size: calc(var(--wr-code-scale) * 1em);
   --wr-list-indent: 1.6em;
+  /* 列表项之间的呼吸（编辑器 line padding / 打印 li+li margin） */
+  --wr-list-gap: 0.2em;
+  /* 无序列表的悬挂缩进：编辑器圆点 widget 宽度与打印 ul 的 padding 同值 */
+  --wr-list-bullet-indent: 1.25em;
+  /* 列表整组相对正文的缩进：圆点落在正文内侧，而不是悬在左边距外（与 Typora 观感一致）。
+     编辑器加在行 padding 上、打印加在 ul/ol 上，两边同一个值。 */
+  --wr-list-offset: 1.5em;
 
   /*
    * ── 外壳基准（唯一来源）──────────────────────────────────────────────
@@ -69,6 +100,9 @@
   --wr-ui-fz: 13px;
   --wr-ui-fz-sm: 12.5px;
   --wr-ui-fz-xs: 11px;
+  /* 侧栏：比外壳正文略大一点，贴近 Typora 的文件树；行高用同一档 */
+  --wr-sidebar-fz: 13.5px;
+  --wr-sidebar-row: 30px;
   /* 圆角档（与 --wr-radius 8px 搭配） */
   --wr-radius-sm: 5px;
   --wr-radius-lg: 10px;
@@ -98,6 +132,7 @@
 
 :root[data-theme="dark"] {
   --wr-bg: #1c1a17;
+  --wr-desk: #14120f;
   --wr-surface: #232019;
   --wr-text: #e8e2d8;
   --wr-muted: #9a9287;
@@ -112,6 +147,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
     --wr-bg: #1c1a17;
+    --wr-desk: #14120f;
     --wr-surface: #232019;
     --wr-text: #e8e2d8;
     --wr-muted: #9a9287;

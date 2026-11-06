@@ -8,13 +8,13 @@ const render = (source: string) => renderMarkdown(source);
 describe("block 渲染", () => {
   it("标题、段落与行内强调", () => {
     expect(render("# 一级\n\n正文 **粗** 与 *斜* 和 ~~删~~")).toBe(
-      '<div class="wr-keep wr-gap">\n<h1 id="一级">一级</h1>\n<p>正文 <strong>粗</strong> 与 <em>斜</em> 和 <del>删</del></p>\n</div>\n',
+      '<div class="wr-keep">\n<h1 id="一级">一级</h1>\n<p>正文 <strong>粗</strong> 与 <em>斜</em> 和 <del>删</del></p>\n</div>\n',
     );
   });
 
   it("标题与紧随其后的块绑在一起，避免页尾孤行", () => {
     const html = render('## 图形\n\n<svg viewBox="0 0 10 10">\n<rect width="4"/>\n</svg>\n\n正文');
-    expect(html).toContain('<div class="wr-keep wr-gap">\n<h2 id="图形">图形</h2>\n<svg');
+    expect(html).toContain('<div class="wr-keep">\n<h2 id="图形">图形</h2>\n<svg');
   });
 
   it("标题生成锚点，重复标题自动加序号", () => {
@@ -136,6 +136,12 @@ describe("block 渲染", () => {
     expect(html).toContain('<th class="wr-align-left">左</th>');
     expect(html).toContain('<th class="wr-align-right">右</th>');
     expect(html).toContain('<td class="wr-align-left">1</td>');
+  });
+
+  it("中间的空单元格不会让后面的列串位", () => {
+    const html = render("| A | B | C |\n| --- | --- | --- |\n| 1 |  | 3 |\n|  | 2 | 3 |");
+    expect(html).toContain("<tr><td>1</td><td></td><td>3</td></tr>");
+    expect(html).toContain("<tr><td></td><td>2</td><td>3</td></tr>");
   });
 
   it("分隔线与 HTML 注释分页", () => {

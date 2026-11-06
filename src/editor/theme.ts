@@ -21,7 +21,15 @@ export const EDITOR_STYLE_SPEC = {
     overflowY: "auto",
     // 原生滚动条在 src/styles/app.css 里全局关掉了（要早于视图创建生效），
     // 由 editor/scrollbar.ts 的自绘指示器替代。
-    backgroundColor: "var(--wr-bg)",
+    // 屏幕上的「桌面」底色：整张纸面（--wr-page-width：A4 纵向 210mm、横向 297mm、
+    // 自适应 100%）用 --wr-bg 竖着铺一条并居中，文字列（--wr-content-measure）落在纸面中间，
+    // 两侧的白色就是页边距，再往外才是更暗的 --wr-desk。纸面（打印 / 导出）仍只有 --wr-bg，不读 --wr-desk。
+    // 纸面宽度不能只取 --wr-measure：那样文字列直接贴着纸边，看着像没有页边距。
+    backgroundColor: "var(--wr-desk)",
+    backgroundImage: "linear-gradient(var(--wr-bg), var(--wr-bg))",
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "center top",
+    backgroundSize: "min(100%, var(--wr-page-width, 210mm)) 100%",
   },
   ".cm-scrollbar-track": {
     position: "absolute",
@@ -45,7 +53,7 @@ export const EDITOR_STYLE_SPEC = {
     backgroundColor: "color-mix(in srgb, var(--wr-text) 32%, transparent)",
   },
   ".cm-content": {
-    maxWidth: "var(--wr-measure)",
+    maxWidth: "var(--wr-content-measure, var(--wr-measure))",
     margin: "0 auto",
     // 文末留白由 `cm-md-bottom-space` 这个块级 widget 提供（见 live-preview/bottom-space.ts）：
     // 它进得了 CodeMirror 的高度表，而 CSS padding 不行。
@@ -64,53 +72,82 @@ export const EDITOR_STYLE_SPEC = {
   // CodeMirror 的高度表只量 offsetHeight，line 的 margin 不计入，
   // 会造成「点击位置 → 光标位置」整体下移一行（posAtCoords 偏移）。
   //
-  // 标题的「上方空白」由源码里那一行空行提供（数值见 tokens.css 的排版基准），
-  // 这里只补标题与下段之间的间隔。不要再加 padding-top：
-  // 空行 + 内边距会叠成两倍，就是之前「标题上下有空得离谱」的原因。
+  // 标题的「上方空白」默认由源码里那一行空行提供（数值见 tokens.css 的排版基准）。
+  // 但作者常常不写空行：`## 二` 直接贴在上段后面。这时给标题补一个小一点的
+  // padding-top（`.cm-md-heading-tight`，由 analyze 按上一行是否为空判断）；
+  // 有空行时**不加**，否则空行 + 内边距会叠成两倍。
+  // 纵向间距只能用 padding，不能用 margin：CodeMirror 的高度表只量 offsetHeight。
   ".cm-md-heading-1": {
-    fontSize: "calc(var(--wr-h1, 2) * 1em)",
-    fontWeight: "700",
+    fontSize: "calc(var(--wr-h1, 1.5) * 1em)",
+    fontWeight: "600",
     fontFamily: "var(--wr-font-heading, var(--wr-font-prose))",
     lineHeight: "var(--wr-heading-lh, 1.3)",
     paddingBottom: "var(--wr-heading-bottom, 5px)",
   },
   ".cm-md-heading-2": {
-    fontSize: "calc(var(--wr-h2, 1.5) * 1em)",
-    fontWeight: "700",
+    fontSize: "calc(var(--wr-h2, 1.3) * 1em)",
+    fontWeight: "600",
     fontFamily: "var(--wr-font-heading, var(--wr-font-prose))",
     lineHeight: "var(--wr-heading-lh, 1.3)",
     paddingBottom: "var(--wr-heading-bottom, 5px)",
   },
   ".cm-md-heading-3": {
-    fontSize: "calc(var(--wr-h3, 1.25) * 1em)",
-    fontWeight: "700",
+    fontSize: "calc(var(--wr-h3, 1.12) * 1em)",
+    fontWeight: "600",
     fontFamily: "var(--wr-font-heading, var(--wr-font-prose))",
     lineHeight: "var(--wr-heading-lh, 1.3)",
     paddingBottom: "var(--wr-heading-bottom, 5px)",
   },
   ".cm-md-heading-4": {
     fontSize: "calc(var(--wr-h4, 1) * 1em)",
-    fontWeight: "700",
+    fontWeight: "600",
     fontFamily: "var(--wr-font-heading, var(--wr-font-prose))",
     lineHeight: "var(--wr-heading-lh, 1.3)",
     paddingBottom: "var(--wr-heading-bottom, 5px)",
   },
   ".cm-md-heading-5": {
-    fontSize: "calc(var(--wr-h5, 0.875) * 1em)",
-    fontWeight: "700",
+    fontSize: "calc(var(--wr-h5, 0.95) * 1em)",
+    fontWeight: "600",
     fontFamily: "var(--wr-font-heading, var(--wr-font-prose))",
     lineHeight: "var(--wr-heading-lh, 1.3)",
     paddingBottom: "var(--wr-heading-bottom, 5px)",
   },
   ".cm-md-heading-6": {
-    fontSize: "calc(var(--wr-h6, 0.85) * 1em)",
-    fontWeight: "700",
+    fontSize: "calc(var(--wr-h6, 0.9) * 1em)",
+    fontWeight: "600",
     fontFamily: "var(--wr-font-heading, var(--wr-font-prose))",
     lineHeight: "var(--wr-heading-lh, 1.3)",
     color: "var(--wr-muted)",
     paddingBottom: "var(--wr-heading-bottom, 5px)",
   },
-  ".cm-md-strong": { fontWeight: "700" },
+  // 没有空行的标题：补上间距（有空行时不加，避免叠成两倍）
+  ".cm-md-heading-tight.cm-md-heading-1": {
+    paddingTop: "calc(var(--wr-heading-top, 14px) * 0.55)",
+  },
+  ".cm-md-heading-tight.cm-md-heading-2": {
+    paddingTop: "var(--wr-heading-top, 14px)",
+  },
+  ".cm-md-heading-tight.cm-md-heading-3": {
+    paddingTop: "calc(var(--wr-heading-top, 14px) * 0.7)",
+  },
+  ".cm-md-heading-tight.cm-md-heading-4": {
+    paddingTop: "calc(var(--wr-heading-top, 14px) * 0.55)",
+  },
+  ".cm-md-heading-tight.cm-md-heading-5": {
+    paddingTop: "calc(var(--wr-heading-top, 14px) * 0.55)",
+  },
+  ".cm-md-heading-tight.cm-md-heading-6": {
+    paddingTop: "calc(var(--wr-heading-top, 14px) * 0.55)",
+  },
+  // 标题后面的空行折叠成 0 高：上方间距由标题的 padding-bottom 提供（Typora 同语义）。
+  // 光标进入该行时 analyze 不再加这个类，空行恢复原高度，仍然可以编辑。
+  ".cm-md-gap-after-heading": {
+    height: "0",
+    lineHeight: "0",
+    overflow: "hidden",
+  },
+  // 无衬线正文的加粗只到 600：微软雅黑的 700 在 17px 下过黑，和正文对比太强。
+  ".cm-md-strong": { fontWeight: "600" },
   ".cm-md-em": { fontStyle: "italic" },
   ".cm-md-strike": { textDecoration: "line-through", color: "var(--wr-muted)" },
   ".cm-md-mark": {
@@ -242,8 +279,9 @@ export const EDITOR_STYLE_SPEC = {
     fontSize: "0.9em",
   },
   ".cm-md-quote": {
-    borderLeft: "3px solid var(--wr-border)",
-    paddingLeft: "1em",
+    "--wr-quote-pad": "0.9em",
+    borderLeft: "2px solid var(--wr-border)",
+    paddingLeft: "var(--wr-quote-pad)",
     color: "var(--wr-muted)",
   },
   // 元信息行（链接引用定义等）：打印不输出，编辑器里弱化，不抢正文
@@ -262,7 +300,7 @@ export const EDITOR_STYLE_SPEC = {
   },
   // 定义列表：术语加粗、解释缩进。与打印的 dt / dd 用同一组值（consistency.test.ts 比对）。
   ".cm-md-def-term": {
-    fontWeight: "700",
+    fontWeight: "600",
   },
   ".cm-md-def-detail": {
     paddingLeft: "1.6em",
@@ -361,21 +399,28 @@ export const EDITOR_STYLE_SPEC = {
   ".cm-md-table table": {
     width: "100%",
     borderCollapse: "collapse",
-    fontSize: "0.92em",
-    lineHeight: "1.6",
+    fontSize: "0.9em",
+    lineHeight: "1.5",
   },
   // 拖过列宽的表格（分隔行横线数不等）：固定布局才让百分比生效，与打印端一致。
   ".cm-md-table table.wr-fixed": {
     tableLayout: "fixed",
   },
   ".cm-md-table th, .cm-md-table td": {
-    padding: "0.35em 0.6em",
+    padding: "0.42em 0.65em",
     border: "1px solid var(--wr-border)",
-    verticalAlign: "top",
+    verticalAlign: "middle",
     cursor: "text",
   },
+  // 单元格里的 <ul>/<ol>：GFM 不能放块级列表，只能写行内 HTML。
+  // 收紧浏览器默认缩进与间距，和打印端的单元格列表同一套数值。
+  ".cm-md-table ul, .cm-md-table ol": {
+    margin: "0",
+    paddingLeft: "1.35em",
+  },
+  ".cm-md-table li + li": { marginTop: "0" },
   ".cm-md-table th": {
-    background: "color-mix(in srgb, var(--wr-border) 32%, transparent)",
+    background: "color-mix(in srgb, var(--wr-border) 18%, transparent)",
     fontWeight: "600",
     textAlign: "left",
     // 列宽拖拽手柄贴在这一格的右边界上（绝对定位，不量布局）
@@ -490,8 +535,8 @@ export const EDITOR_STYLE_SPEC = {
     zIndex: "6",
     boxSizing: "border-box",
     margin: "0",
-    // 与 th/td 的水平内边距对齐，输入时文字不会贴到边框
-    padding: "0 0.6em",
+    // 与 th/td 的内边距、行高对齐：多行内容在浮层里与渲染后的单元格同一套版式
+    padding: "0.55em 0.8em",
     border: "1px solid var(--wr-accent)",
     borderRadius: "3px",
     outline: "none",
@@ -499,7 +544,10 @@ export const EDITOR_STYLE_SPEC = {
     color: "var(--wr-text)",
     fontFamily: "inherit",
     fontSize: "0.92em",
-    lineHeight: "1.4",
+    lineHeight: "1.6",
+    resize: "none",
+    overflow: "hidden",
+    whiteSpace: "pre-wrap",
   },
   ".cm-md-toc": {
     position: "relative",
@@ -591,6 +639,7 @@ export const EDITOR_STYLE_SPEC = {
     display: "inline-block",
     width: "1.15em",
     marginRight: "0.1em",
+    textIndent: "0",
     color: "var(--wr-link)",
     // 与打印端同一套字体：符号字形不同会让方框大小看着不一样
     fontFamily: '"Segoe UI Symbol", "Noto Sans Symbols 2", sans-serif',
@@ -600,11 +649,42 @@ export const EDITOR_STYLE_SPEC = {
   ".cm-md-task.is-checked": {
     color: "var(--wr-accent)",
   },
-  // 无序列表的圆点：只占自身宽度，别把后面的文字推太远
+  // 列表悬挂缩进：换行回到文字列，而不是回到最左边（打印的 padding 用同一组值）
+  // 引用块里要叠加 `--wr-quote-pad`：引用与列表都给了左边距，不能互相覆盖。
+  // `--wr-list-offset` 让整组列表缩进到正文内侧，圆点不再悬在左边距外。
+  ".cm-md-list-line": {
+    paddingLeft:
+      "calc(var(--wr-list-offset, 1.5em) + var(--wr-list-bullet-indent, 1.25em) + var(--wr-quote-pad, 0em))",
+    textIndent: "calc(-1 * var(--wr-list-bullet-indent, 1.25em))",
+  },
+  ".cm-md-list-ordered": {
+    paddingLeft:
+      "calc(var(--wr-list-offset, 1.5em) + var(--wr-list-indent, 1.6em) + var(--wr-quote-pad, 0em))",
+    textIndent: "calc(-1 * var(--wr-list-indent, 1.6em))",
+  },
+  // 同一列表里的第二项起：给一点项间呼吸（与打印 li+li 同源）
+  ".cm-md-list-gap": { paddingTop: "var(--wr-list-gap, 0.2em)" },
+  // 无序列表的圆点：宽度 = 悬挂缩进，文字才会和换行后的位置对齐。
+  // `text-indent` 会被 inline-block 继承到自己的内部，圆点会画到方框左边外面
+  // （表现为「圆点悬在正文左侧」），所以这里必须显式清零。
   ".cm-md-bullet": {
     display: "inline-block",
-    marginRight: "0.15em",
+    width: "var(--wr-list-bullet-indent, 1.25em)",
+    textIndent: "0",
     color: "var(--wr-text)",
+    userSelect: "none",
+  },
+  // 有序列表的数字：同样固定宽度，首行文字与换行后的文字对齐；
+  // 数字右对齐，和后面的文字只隔一个空格（左对齐会留下半格空白）。
+  ".cm-md-number": {
+    display: "inline-block",
+    boxSizing: "border-box",
+    width: "var(--wr-list-indent, 1.6em)",
+    paddingRight: "0.35em",
+    textAlign: "right",
+    textIndent: "0",
+    color: "var(--wr-text)",
+    fontVariantNumeric: "tabular-nums",
     userSelect: "none",
   },
   ".cm-panels": {

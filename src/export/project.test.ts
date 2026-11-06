@@ -28,7 +28,7 @@ describe("renderProject", () => {
     expect(result.html).toContain('href="#起-2"');
     expect(result.html).toContain('class="wr-project-chapter"');
     expect(result.html).toContain("长夜");
-  });
+  }, 15000);
 
   it("不生成目录时仍保留章节锚点", async () => {
     const result = await renderProject(

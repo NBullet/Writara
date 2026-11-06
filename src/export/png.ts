@@ -1,14 +1,20 @@
 /**
- * 导出 PNG：把打印区按 A4 版面截图。
+ * 导出 PNG：把打印区按当前版面截图。
  *
  * 用 html-to-image（foreignObject）而不是逐个计算样式，
  * 这样字体、表格、代码块、SVG、KaTeX 的排版与打印一致。
  * 只在点击导出时加载。
  */
 
-const A4_WIDTH_PX = 794; // 210mm @ 96dpi
+import { PX_PER_MM } from "./page";
 
-export async function downloadPng(fileName: string, host: HTMLElement): Promise<void> {
+const A4_WIDTH_PX = Math.round(210 * PX_PER_MM); // 210mm @ 96dpi
+
+export async function downloadPng(
+  fileName: string,
+  host: HTMLElement,
+  paperWidthMm = 210,
+): Promise<void> {
   const { toPng } = await import("html-to-image");
 
   // .wr-png 原本把宿主放在 left:-20000px（屏幕上不可见），但 html-to-image 会把
@@ -17,17 +23,19 @@ export async function downloadPng(fileName: string, host: HTMLElement): Promise<
   const previous = {
     left: host.style.left,
     top: host.style.top,
+    width: host.style.width,
     zIndex: host.style.zIndex,
   };
   host.classList.add("wr-png");
   host.style.left = "0px";
   host.style.top = "0px";
+  host.style.width = `${paperWidthMm}mm`;
   host.style.zIndex = "-1";
   try {
     const dataUrl = await toPng(host, {
       backgroundColor: "#ffffff",
       pixelRatio: 2,
-      width: A4_WIDTH_PX,
+      width: Math.round(paperWidthMm * PX_PER_MM),
       cacheBust: true,
     });
 
@@ -38,6 +46,7 @@ export async function downloadPng(fileName: string, host: HTMLElement): Promise<
   } finally {
     host.style.left = previous.left;
     host.style.top = previous.top;
+    host.style.width = previous.width;
     host.style.zIndex = previous.zIndex;
     host.classList.remove("wr-png");
   }

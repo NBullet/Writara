@@ -4,20 +4,26 @@
   width: min(900px, calc(100vw - 48px));
 }
 
+/*
+ * 左分类 + 右内容 + 底部操作行。底部是真实的一行（不是浮在内容上的绝对定位），
+ * 滚动条因此只出现在内容区、停在操作行上方，不会压住「完成」按钮或切到圆角外。
+ */
 .wr-prefs {
-  position: relative;
-  display: flex;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  column-gap: 20px;
   height: min(640px, calc(100vh - 96px));
   padding: 20px 20px 0;
 }
 
 .wr-prefs-nav {
   display: flex;
-  flex-shrink: 0;
   flex-direction: column;
   gap: 8px;
-  width: 168px;
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 0;
   padding-right: 16px;
   border-right: 1px solid var(--wr-border);
 }
@@ -81,10 +87,17 @@
 }
 
 .wr-prefs-body {
-  flex: 1;
+  /* 滚动条贴到对话框右边缘：内容仍留在 20px 内边距里，滚动条不至于悬在空白中间 */
+  margin-right: -20px;
+  padding-right: 20px;
+  padding-bottom: 12px;
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
-  padding-bottom: 56px;
+  /* 各分区内容长短不一：常驻滚动条槽位，切分区时正文不会左右跳 */
+  scrollbar-gutter: stable;
 }
 
 .wr-prefs-section + .wr-prefs-section {
@@ -421,14 +434,16 @@
 }
 
 .wr-prefs-footer {
-  position: absolute;
-  right: 20px;
-  bottom: 16px;
-  left: 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  /* 横向铺满整张卡片（分隔线贴边），内容仍按 20px 内边距对齐 */
+  margin: 0 -20px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--wr-border);
 }
 
 .wr-prefs-footer-hint {

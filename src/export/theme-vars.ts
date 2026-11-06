@@ -32,8 +32,12 @@ const VARIABLES = [
   "--wr-h6",
   "--wr-heading-lh",
   "--wr-heading-ratio",
+  "--wr-heading-bottom",
+  "--wr-heading-top",
   "--wr-code-size",
   "--wr-list-indent",
+  "--wr-list-gap",
+  "--wr-list-bullet-indent",
 ] as const;
 
 export function themeVariables(root: HTMLElement = document.documentElement): Array<[string, string]> {

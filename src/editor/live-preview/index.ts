@@ -9,6 +9,7 @@ import { BulletWidget } from "./bullet-widget";
 import { EmojiWidget } from "./emoji-widget";
 import { FootnoteWidget } from "./footnote-widget";
 import { LanguageBadgeWidget } from "./language-widget";
+import { NumberWidget } from "./number-widget";
 import { InlineMathWidget } from "./math-widget";
 import { mathScanFor } from "./math-blocks";
 import { refreshPreviewEffect } from "./refresh";
@@ -76,6 +77,12 @@ function build(view: EditorView, tree: Tree): DecorationSet {
         if (crossesLine(edit.from, edit.to)) break;
         ranges.push(
           Decoration.replace({ widget: new BulletWidget(edit.depth) }).range(edit.from, edit.to),
+        );
+        break;
+      case "number":
+        if (crossesLine(edit.from, edit.to)) break;
+        ranges.push(
+          Decoration.replace({ widget: new NumberWidget(edit.text) }).range(edit.from, edit.to),
         );
         break;
       case "emoji":

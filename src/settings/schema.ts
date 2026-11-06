@@ -186,6 +186,40 @@ export const SECTIONS: SettingSection[] = [
         ],
       },
       {
+        title: "版面",
+        rows: [
+          {
+            field: "paper",
+            label: "纸张",
+            hint: "编辑区纸面与打印 / 导出共用；自适应铺满编辑区，打印时按内容选纵 / 横",
+            keywords: ["纸张", "版面", "a4", "letter", "横向", "纵向", "自适应", "landscape", "auto"],
+            control: {
+              type: "select",
+              choices: [
+                { value: "a4", label: "A4 纵向" },
+                { value: "a4-landscape", label: "A4 横向" },
+                { value: "auto", label: "自适应" },
+                { value: "letter", label: "Letter" },
+              ],
+            },
+          },
+          {
+            field: "margin",
+            label: "页边距",
+            hint: "编辑区纸面与打印 / 导出共用",
+            keywords: ["页边距", "margin"],
+            control: {
+              type: "select",
+              choices: [
+                { value: "normal", label: "常规" },
+                { value: "narrow", label: "窄" },
+                { value: "wide", label: "宽" },
+              ],
+            },
+          },
+        ],
+      },
+      {
         title: "自定义样式",
         rows: [
           {
@@ -426,31 +460,6 @@ export const SECTIONS: SettingSection[] = [
       {
         title: "打印与 PDF",
         rows: [
-          {
-            field: "paper",
-            label: "纸张",
-            keywords: ["纸张", "a4", "letter"],
-            control: {
-              type: "select",
-              choices: [
-                { value: "a4", label: "A4" },
-                { value: "letter", label: "Letter" },
-              ],
-            },
-          },
-          {
-            field: "margin",
-            label: "页边距",
-            keywords: ["页边距", "margin"],
-            control: {
-              type: "select",
-              choices: [
-                { value: "normal", label: "常规" },
-                { value: "narrow", label: "窄" },
-                { value: "wide", label: "宽" },
-              ],
-            },
-          },
           {
             field: "pdfPageNumbers",
             label: "PDF 页码",

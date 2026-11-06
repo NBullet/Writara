@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { initialCaret } from "../create-editor";
 import { writaraExtensions } from "../extensions";
 import { setSourceMode, setViewModes } from "../modes";
+import { activeCellCaret } from "../table-focus";
 import { openSearchPanel } from "@codemirror/search";
 
 let views: EditorView[] = [];
@@ -279,6 +280,89 @@ describe("live preview 装饰", () => {
     expect(editor.contentDOM.querySelector(".cm-md-table")).not.toBeNull();
   });
 
+  it("单元格里按 Ctrl+B 就地加粗，写回源码后仍是粗体", () => {
+    const doc = "| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 1 |";
+    const editor = mount(doc);
+    editor.contentDOM
+      .querySelector<HTMLTableCellElement>(".cm-md-table td")
+      ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+
+    const input = editor.contentDOM.querySelector<HTMLInputElement>(".cm-md-cell-editor");
+    expect(input?.value).toBe("苹果");
+
+    if (input) {
+      input.setSelectionRange(0, 2);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true }));
+      expect(input.value).toBe("**苹果**");
+
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    }
+
+    expect(editor.state.doc.toString()).toContain("| **苹果** | 1 |");
+    expect(editor.contentDOM.querySelector(".cm-md-table strong")?.textContent).toBe("苹果");
+  });
+
+  it("单元格里再按一次 Ctrl+B 取消加粗", () => {
+    const doc = "| 名称 | 数量 |\n| --- | --- |\n| **苹果** | 1 |";
+    const editor = mount(doc);
+    editor.contentDOM
+      .querySelector<HTMLTableCellElement>(".cm-md-table td")
+      ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+
+    const input = editor.contentDOM.querySelector<HTMLInputElement>(".cm-md-cell-editor");
+    expect(input?.value).toBe("**苹果**");
+
+    if (input) {
+      input.setSelectionRange(0, input.value.length);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true }));
+      expect(input.value).toBe("苹果");
+    }
+  });
+
+  it("空引用行之后的正文不属于引用（插入 > 不会把下一行包进去）", () => {
+    const doc = "> 风险\n\n>\n财务知识库";
+    const editor = mount(doc);
+    const lines = [...editor.contentDOM.querySelectorAll<HTMLElement>(".cm-line")];
+    const last = lines[lines.length - 1];
+    expect(last?.textContent).toBe("财务知识库");
+    expect(last?.classList.contains("cm-md-quote")).toBe(false);
+  });
+
+  it("单元格输入框的光标映射回文档位置（AI 续写的插入点）", () => {
+    const doc = "| A | B |\n| --- | --- |\n| a1 | b1 |";
+    const editor = mount(doc);
+    editor.contentDOM
+      .querySelector<HTMLTableCellElement>(".cm-md-table td")
+      ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+
+    const input = editor.contentDOM.querySelector<HTMLInputElement>(".cm-md-cell-editor");
+    expect(input?.value).toBe("a1");
+
+    input!.setSelectionRange(1, 1);
+    const caret = activeCellCaret();
+    expect(caret?.live).toBe(true);
+    expect(caret!.contentFrom + caret!.offset).toBe(doc.indexOf("a1") + 1);
+  });
+
+  it("提交单元格后插入点仍然可用（失焦 / 菜单触发 AI）", () => {
+    const doc = "| A | B |\n| --- | --- |\n| a1 | b1 |";
+    const editor = mount(doc);
+    editor.contentDOM
+      .querySelector<HTMLTableCellElement>(".cm-md-table td")
+      ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+
+    const input = editor.contentDOM.querySelector<HTMLInputElement>(".cm-md-cell-editor");
+    input!.value = "a1xx";
+    input!.setSelectionRange(4, 4);
+    input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    const caret = activeCellCaret();
+    expect(caret?.live).toBe(false);
+    expect(caret!.docLength).toBe(editor.state.doc.length);
+    expect(editor.state.doc.toString()).toContain("| a1xx | b1 |");
+    expect(caret!.contentFrom + caret!.offset).toBe(editor.state.doc.toString().indexOf("a1xx") + 4);
+  });
+
   it("表格工具条可以改当前列的对齐", () => {
     const doc = "| 左 | 右 |\n| --- | --- |\n| 1 | 2 |";
     const editor = mount(doc);
@@ -350,6 +434,13 @@ describe("live preview 装饰", () => {
     expect(editor.state.doc.toString()).toBe("- 一\n  - 项目");
   });
 
+  it("有序列表的数字换成固定宽度标记", () => {
+    const editor = mount("前言\n\n1. 一\n2. 二", 0);
+    expect(
+      [...editor.contentDOM.querySelectorAll(".cm-md-number")].map((el) => el.textContent),
+    ).toEqual(["1.", "2."]);
+  });
+
   it("任务列表渲染成可点击方框，点击写回文档", () => {    const editor = mount("前言\n\n- [ ] 待办");
     const box = editor.contentDOM.querySelector<HTMLElement>(".cm-md-task");
     expect(box?.textContent).toBe("☐");
@@ -358,6 +449,50 @@ describe("live preview 装饰", () => {
     expect(editor.state.doc.toString()).toBe("前言\n\n- [x] 待办");
     const after = editor.contentDOM.querySelector<HTMLElement>(".cm-md-task");
     expect(after?.textContent).toBe("☑");
+  });
+
+  it("表格单元格里 Shift+Enter 插入 <br>，Enter 提交", async () => {
+    const doc = "| A | B |\n| --- | --- |\n| ab | 2 |";
+    const editor = mount(doc);
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const input = () => editor.contentDOM.querySelector<HTMLInputElement>(".cm-md-cell-editor");
+
+    editor.contentDOM
+      .querySelector<HTMLTableCellElement>(".cm-md-table td")
+      ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(input()?.value).toBe("ab");
+
+    const cellInput = input()!;
+    cellInput.setSelectionRange(1, 1);
+    cellInput.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(cellInput.value).toBe("a\nb");
+
+    cellInput.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    await tick();
+    expect(editor.state.doc.toString()).toContain("| a<br>b | 2 |");
+  });
+
+  it("已有 <br> 的单元格打开时显示成多行，提交后仍写回 <br>", async () => {
+    const doc = "| A | B |\n| --- | --- |\n| a<br>b | 2 |";
+    const editor = mount(doc);
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const input = () => editor.contentDOM.querySelector<HTMLTextAreaElement>(".cm-md-cell-editor");
+
+    editor.contentDOM
+      .querySelector<HTMLTableCellElement>(".cm-md-table td")
+      ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(input()?.value).toBe("a\nb");
+
+    if (input()) {
+      input()!.value = "a\nc";
+      input()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    }
+    await tick();
+    expect(editor.state.doc.toString()).toContain("| a<br>c | 2 |");
   });
 
   it("表格里按 Tab 连跳下一格；末格再 Tab 追加一行", async () => {

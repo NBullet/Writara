@@ -81,12 +81,31 @@ export const PRINT_CSS = `/*
 .wr-doc h5,
 .wr-doc h6 {
   margin: 0 0 var(--head-gap);
-  font-weight: 700;
+  font-weight: 600;
   font-family: var(--wr-font-heading, var(--wr-font-prose));
   line-height: var(--wr-heading-lh, 1.3);
   break-after: avoid-page;
   page-break-after: avoid;
   break-inside: avoid;
+}
+
+/* 没有空行时标题的上间距（编辑器用 padding-top，这里用 margin-top） */
+.wr-doc h1.wr-tight {
+  margin-top: calc(var(--wr-heading-top, 14px) * 0.55);
+}
+
+.wr-doc h2.wr-tight {
+  margin-top: var(--wr-heading-top, 14px);
+}
+
+.wr-doc h3.wr-tight {
+  margin-top: calc(var(--wr-heading-top, 14px) * 0.7);
+}
+
+.wr-doc h4.wr-tight,
+.wr-doc h5.wr-tight,
+.wr-doc h6.wr-tight {
+  margin-top: calc(var(--wr-heading-top, 14px) * 0.55);
 }
 
 .wr-doc h1 { font-size: calc(var(--wr-h1, 2) * 1em); }
@@ -115,7 +134,7 @@ export const PRINT_CSS = `/*
 
 .wr-doc dl.wr-dl dt {
   /* 与编辑器 .cm-md-def-term 一致；serif 字体没有 semibold，600 看起来仍然是常规字重 */
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .wr-doc dl.wr-dl dd {
@@ -124,21 +143,13 @@ export const PRINT_CSS = `/*
 }
 
 /*
- * 标题后面的空行：编辑器里那是一整行看得见的空白，打印没有行，
- * 所以在「标题 + 下一块」这组里把同样的距离补出来
- * （上一块与标题之间的空行已经由块间距对上，不用重复处理）。
+ * 标题后面的空行不额外补间距：编辑器里那一行由 .cm-md-gap-after-heading 折叠成 0，
+ * 打印没有行，两边都只保留标题自己的 margin-bottom（--head-gap）。
  */
-.wr-doc .wr-gap > :first-child {
-  margin-bottom: 0;
-}
-
-.wr-doc .wr-gap > :last-child {
-  margin-top: calc(var(--block-gap) + var(--head-gap));
-}
 
 .wr-doc strong,
 .wr-doc b {
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .wr-doc em,
@@ -281,8 +292,8 @@ export const PRINT_CSS = `/*
 }
 
 .wr-doc blockquote {
-  padding-left: 1em;
-  border-left: 3px solid var(--wr-border, #ddd7ca);
+  padding-left: 0.9em;
+  border-left: 2px solid var(--wr-border, #ddd7ca);
   color: var(--wr-muted, #6b6459);
   break-inside: avoid;
   page-break-inside: avoid;
@@ -293,15 +304,20 @@ export const PRINT_CSS = `/*
 }
 
 /* 无序列表：符号与编辑器完全一致（• ◦ ▪），不用浏览器自带的 disc/circle/square ——
-   自带符号由字体决定，不同字体的圆点大小差得肉眼可见。 */
+   自带符号由字体决定，不同字体的圆点大小差得肉眼可见。
+   --wr-list-offset 与编辑器同一个值：整组列表离开正文左边距，圆点不悬在外面。 */
 .wr-doc ul {
-  padding-left: 0;
+  padding-left: var(--wr-list-offset, 1.5em);
   list-style: none;
 }
 
 .wr-doc ul > li {
   position: relative;
-  padding-left: 0.75em;
+  padding-left: var(--wr-list-bullet-indent, 1.25em);
+}
+
+.wr-doc li + li {
+  margin-top: var(--wr-list-gap, 0.2em);
 }
 
 .wr-doc ul > li::before {
@@ -311,15 +327,27 @@ export const PRINT_CSS = `/*
   top: 0;
 }
 
-.wr-doc ul ul > li::before {
+/* 层级按 ListItem 的嵌套深度算，不是只数 ul 的层数：
+   ol > li > ul > li 在编辑器里是二级（◦），打印也必须是 ◦。 */
+.wr-doc li :is(ul, ol) > li::before {
   content: "◦";
 }
 
-.wr-doc ul ul ul > li::before {
+.wr-doc li li :is(ul, ol) > li::before {
   content: "▪";
 }
 
 .wr-doc ol {
+  padding-left: calc(var(--wr-list-offset, 1.5em) + var(--wr-list-indent, 1.6em));
+}
+
+/* 嵌套列表不再叠加整组缩进：--wr-list-offset 只在最外层让列表离开正文左边距，
+   层级之间的缩进仍由各自的悬挂缩进负责（与编辑器的固定 padding 同一口径）。 */
+.wr-doc li :is(ul, ol) {
+  padding-left: 0;
+}
+
+.wr-doc li > ol {
   padding-left: var(--wr-list-indent, 1.6em);
 }
 
@@ -370,10 +398,10 @@ export const PRINT_CSS = `/*
 
 .wr-doc table {
   width: 100%;
-  padding: 0.45em 0;
+  padding: 0.3em 0;
   border-collapse: collapse;
-  font-size: 0.92em;
-  line-height: 1.6;
+  font-size: 0.9em;
+  line-height: 1.5;
   break-inside: avoid;
   page-break-inside: avoid;
 }
@@ -398,13 +426,31 @@ export const PRINT_CSS = `/*
 
 .wr-doc th,
 .wr-doc td {
-  padding: 0.35em 0.6em;
+  padding: 0.42em 0.65em;
   border: 1px solid var(--wr-border, #ddd7ca);
-  vertical-align: top;
+  vertical-align: middle;
+}
+
+/*
+ * 表格单元格里的列表：GFM 表格不能放块级 Markdown，只能用行内 HTML
+ * （<ul><li>…</li></ul>）。这里收紧列表自己的整块间距与缩进，
+ * 否则会继承正文列表的 block-gap，把单元格撑得很高、内容也不居中。
+ */
+.wr-doc th ul,
+.wr-doc td ul,
+.wr-doc th ol,
+.wr-doc td ol {
+  margin: 0;
+  padding-left: 1.35em;
+}
+
+.wr-doc th li,
+.wr-doc td li {
+  margin: 0;
 }
 
 .wr-doc th {
-  background: color-mix(in srgb, var(--wr-border, #ddd7ca) 32%, transparent);
+  background: color-mix(in srgb, var(--wr-border, #ddd7ca) 18%, transparent);
   /* 与编辑器表格的 th 权重一致（theme.ts 里是 600） */
   font-weight: 600;
   text-align: left;

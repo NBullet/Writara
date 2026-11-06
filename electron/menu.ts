@@ -39,6 +39,7 @@ export const DEFAULT_MENU_STATE: MenuState = {
   sourceMode: false,
   focusMode: false,
   typewriterMode: false,
+  paper: "a4",
   statusBar: true,
   style: "writara",
   lineEnding: "lf",

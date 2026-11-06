@@ -52,6 +52,14 @@ contextBridge.exposeInMainWorld("writara", {
     updateState: (state) => ipcRenderer.invoke("menu:state", state),
   },
 
+  logs: {
+    open: () => ipcRenderer.invoke("app:open-logs"),
+  },
+
+  log: (entry) => ipcRenderer.send("app:log", entry),
+  breadcrumb: (label) => ipcRenderer.send("app:breadcrumb", label),
+  heartbeat: () => ipcRenderer.send("app:heartbeat"),
+
   ai: {
     detect: (force) => ipcRenderer.invoke("ai:detect", force === true),
     models: (agentId) => ipcRenderer.invoke("ai:models", agentId),

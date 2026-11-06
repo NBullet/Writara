@@ -4,6 +4,7 @@ import * as fsSync from "node:fs";
 import path from "node:path";
 
 import { decodeBuffer, encodeText } from "./encoding";
+import { saveBaseName } from "./save-name";
 import type { TextEncoding } from "../src/io/encoding";
 
 /**
@@ -281,7 +282,8 @@ function handle(channel: string, fn: (...args: unknown[]) => Promise<unknown>): 
 }
 
 function markdownName(name: string, fallback = "未命名"): string {
-  const trimmed = name.trim() || fallback;
+  // 名称里混进路径 / 非法字符时，保存对话框的「文件名」框会报「文件名无效」。
+  const trimmed = saveBaseName(name, fallback);
   return /\.(md|markdown|mdx)$/i.test(trimmed) ? trimmed : `${trimmed}.md`;
 }
 
@@ -390,6 +392,67 @@ export function assertAllowedPath(target: string): void {
   assertAllowed(target);
 }
 
+/**
+ * 「打开」对话框的起始目录。
+ *
+ * Windows 的 IFileDialog 只认平台原生写法：`E:/a/b.md` 会被当成一个文件名
+ * （粘进「文件名」框就报「文件名无效」），目录不存在时它又会悄悄退回「文档」。
+ * 所以这里统一：转到目录、必须是真实存在的文件夹（找不到就逐级向上退），
+ * 并用 `path.normalize` 换成反斜杠；实在没有可用的就退到上次成功用过的目录。
+ */
+let lastOpenDir: string | null = null;
+
+/**
+ * 目录探测要有上限：离线的网络盘会让 stat 挂很久，别把「打开」卡住。
+ * 返回 `null` 表示超时（调用方应立刻放弃继续向上探测）。
+ */
+async function probeDirectory(target: string): Promise<boolean | null> {
+  const result = await Promise.race([
+    fs.stat(target).then(
+      (stat) => stat.isDirectory(),
+      () => false,
+    ),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 600)),
+  ]);
+  return result;
+}
+
+async function dialogStartDir(target: unknown): Promise<string> {
+  if (typeof target === "string") {
+    const cleaned = target
+      .replace(/[\u200b-\u200f\u202a-\u202e\u2060\ufeff]/g, "")
+      .trim()
+      .replace(/^["'“”‘’「」`]|["'“”‘’「」`]$/g, "");
+    if (cleaned && path.isAbsolute(cleaned)) {
+      let candidate = path.normalize(cleaned);
+      const probe = await probeDirectory(candidate);
+      if (probe === false) {
+        // 文件 → 所在目录；目录不存在（被移动 / 盘符离线）→ 逐级向上退。
+        let dir = path.dirname(candidate);
+        candidate = "";
+        for (let depth = 0; depth < 8; depth += 1) {
+          const found = await probeDirectory(dir);
+          if (found === null) break; // 网络盘没响应，别再等
+          if (found) {
+            candidate = dir;
+            break;
+          }
+          const next = path.dirname(dir);
+          if (next === dir) break;
+          dir = next;
+        }
+      }
+      if (candidate) {
+        lastOpenDir = candidate;
+        return candidate;
+      }
+    }
+  }
+  if (lastOpenDir) return lastOpenDir;
+  const documents = app.getPath("documents");
+  return (await probeDirectory(documents)) ? documents : app.getPath("home");
+}
+
 export function registerFileIpc(): void {
   // 先恢复上次用过的白名单：否则「恢复上次会话」会在第一个 read 上被拦下来。
   loadAllowedState();
@@ -400,16 +463,16 @@ export function registerFileIpc(): void {
     // 从当前文档 / 工作区目录打开：Windows 的打开对话框没有「上次目录」时
     // 会停在任意位置，用户只好把相对路径粘进文件名框，结果报「文件名无效」。
     const { defaultPath } = (payload ?? {}) as { defaultPath?: unknown };
-    const initial =
-      typeof defaultPath === "string" && path.isAbsolute(defaultPath) ? defaultPath : undefined;
+    const initial = await dialogStartDir(defaultPath);
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
       filters: MD_FILTER,
-      ...(initial ? { defaultPath: initial } : {}),
+      defaultPath: initial,
     });
     const file = result.filePaths[0];
     if (result.canceled || !file) return null;
 
+    lastOpenDir = path.dirname(file);
     allowFile(file);
     // 允许读写所在目录：相对路径图片和 `${文档名}.assets/` 都在这里。
     allowRoot(path.dirname(file));

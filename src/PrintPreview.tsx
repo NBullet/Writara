@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { paperLabel, resolvePage } from "./export/page";
 import { configurePrint, printMarkdown, renderArticle } from "./export/print";
 import { SAMPLE_DOC } from "./sample";
 import { loadDraft } from "./storage/draft";
@@ -14,11 +15,16 @@ export function PrintPreview() {
   const [doc] = useState(() => loadDraft()?.text ?? SAMPLE_DOC);
   const [html, setHtml] = useState("");
   const [ready, setReady] = useState(false);
+  const [paper, setPaper] = useState("A4 纵向");
 
   useEffect(() => {
     const settings = loadSettings();
     applySettings(settings);
     applyCustomCss(settings.customCss);
+    setPaper(paperLabel(settings.paper));
+    // 预览页显示的是「纸」本身：自适应在编辑区铺满窗口，但打印纸仍是 A4。
+    const page = resolvePage({ paper: settings.paper, margin: settings.margin });
+    document.documentElement.style.setProperty("--wr-sheet-width", `${page.paperWidthMm}mm`);
     configurePrint({
       paper: settings.paper,
       margin: settings.margin,
@@ -45,7 +51,7 @@ export function PrintPreview() {
   return (
     <div className="wr-print-preview">
       <div className="wr-print-preview-bar">
-        <span>打印预览 · A4 · 在打印对话框里关闭「页眉和页脚」效果最接近 Typora</span>
+        <span>打印预览 · {paper} · 在打印对话框里关闭「页眉和页脚」效果最接近 Typora</span>
         <button type="button" className="wr-button" disabled={!ready} onClick={() => void printMarkdown(doc)}>
           {ready ? "打印 / 另存为 PDF" : "渲染中…"}
         </button>

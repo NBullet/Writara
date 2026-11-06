@@ -3,7 +3,15 @@ import { currentSettings } from "../storage/settings";
 import { highlightCodeBlocks } from "./highlight";
 import { KATEX_CSS, inlineKatexFonts } from "./katexCss";
 import { renderMermaidBlocks } from "./mermaid";
-import { PX_PER_MM, resolveLayout, resolvePage, type PageSettings, type ResolvedPage } from "./page";
+import {
+  PX_PER_MM,
+  resolveLayout,
+  resolvePage,
+  type DocLayout,
+  type PageOrientation,
+  type PageSettings,
+  type ResolvedPage,
+} from "./page";
 import { downloadPng } from "./png";
 import { PRINT_CSS } from "./printStyles";
 import { resolveHtmlImages, type ImageResolve } from "./resolve-images";
@@ -21,12 +29,26 @@ const HOST_ID = "wr-print-host";
 const STYLE_ID = "wr-print-styles";
 const PAGE_STYLE_ID = "wr-page-settings";
 
+type PrintSettings = PageSettings & { fontSize?: number; measure?: number };
+
+/** 一次导出的完整版面：纸张、栏宽/字号、以及写进 <head> 的那份 CSS。 */
+interface PrintPlan {
+  page: ResolvedPage;
+  layout: DocLayout;
+  css: string;
+}
+
 /** 当前纸张设置；由 configurePrint 更新。 */
-let page: ResolvedPage = resolvePage({ paper: "a4", margin: "normal" });
+let printSettings: PrintSettings = { paper: "a4", margin: "normal" };
+
+function planFor(orientation: PageOrientation = "portrait"): PrintPlan {
+  const page = resolvePage({ ...printSettings, orientation });
+  const layout = resolveLayout(page, printSettings.fontSize ?? 17, printSettings.measure ?? 42);
+  return { page, layout, css: `${page.css}\n${layout.css}` };
+}
 
 /** @page + 正文栏宽/字号：所有出口（打印、PDF、导出 HTML）都用这一份。 */
-let layout = resolveLayout(page, 17, 42);
-let pageCss = `${page.css}\n${layout.css}`;
+let plan = planFor();
 
 /** 自定义 CSS（设置里导入的），导出时一并内联。 */
 let customCss = "";
@@ -35,11 +57,8 @@ export function setCustomCss(css: string): void {
   customCss = css.replace(/<\/style/gi, "");
 }
 
-/** 切换纸张/页边距/字号/栏宽。样式放在 head 末尾，覆盖 PRINT_CSS 里的默认值。 */
-export function configurePrint(settings: PageSettings & { fontSize?: number; measure?: number }): void {
-  page = resolvePage(settings);
-  layout = resolveLayout(page, settings.fontSize ?? 17, settings.measure ?? 42);
-  pageCss = `${page.css}\n${layout.css}`;
+function applyPlan(next: PrintPlan): void {
+  plan = next;
   if (typeof document === "undefined") return;
 
   let style = document.getElementById(PAGE_STYLE_ID) as HTMLStyleElement | null;
@@ -47,15 +66,20 @@ export function configurePrint(settings: PageSettings & { fontSize?: number; mea
     style = document.createElement("style");
     style.id = PAGE_STYLE_ID;
   }
-  style.textContent = pageCss;
+  style.textContent = plan.css;
   document.head.appendChild(style);
 }
 
-/** A4 去掉 @page 上下边距后的正文高度（默认值；configurePrint 会覆盖）。 */
-const MM_TO_PX = 96 / 25.4;
-
 /** 上一次渲染进打印区的内容来源，用来判断是否需要重渲染。 */
 let preparedSource: string | null = null;
+
+/** 切换纸张/页边距/字号/栏宽。样式放在 head 末尾，覆盖 PRINT_CSS 里的默认值。 */
+export function configurePrint(settings: PrintSettings): void {
+  printSettings = settings;
+  applyPlan(planFor(settings.orientation));
+  // 版式变了，打印区里按旧纸宽量出来的分页标记就作废了。
+  preparedSource = null;
+}
 
 /**
  * 比一页还高的块（长代码、长表格、标题+长代码的组合）不该再坚持整块不拆，
@@ -64,12 +88,47 @@ let preparedSource: string | null = null;
  */
 export function markSplittable(
   host: HTMLElement,
-  pageHeightPx = page.contentHeightMm * MM_TO_PX,
+  pageHeightPx = plan.page.contentHeightMm * PX_PER_MM,
 ): void {
   const blocks = host.querySelectorAll("pre, table, blockquote, figure, .wr-keep");
   for (const block of Array.from(blocks)) {
     block.classList.remove("wr-split");
     if (block.getBoundingClientRect().height > pageHeightPx) block.classList.add("wr-split");
+  }
+}
+
+/**
+ * 自适应版面的方向：内容在纵向 A4 里放不下时就换横向。
+ *
+ * 自适应版面的正文列本来就会铺满纸张，所以只需要看「能不能放下」：
+ * 表格按 `max-content` 量出来的自然宽度超过纵向可用宽，就换横向；
+ * 公式行超出也算。只量不写回，量完立刻移除探针。
+ */
+function autoOrientation(bodyHtml: string): PageOrientation {
+  if (printSettings.paper !== "auto" || typeof document === "undefined") return "portrait";
+  const portrait = resolvePage({ ...printSettings, orientation: "portrait" });
+  const limit = portrait.contentWidthMm * PX_PER_MM - 1;
+
+  installPrintStyles();
+  const probe = document.createElement("div");
+  probe.className = "wr-print-host wr-measure";
+  probe.style.width = `${portrait.contentWidthMm}mm`;
+  probe.innerHTML = bodyHtml;
+  document.body.appendChild(probe);
+  try {
+    for (const table of Array.from(probe.querySelectorAll<HTMLElement>("table"))) {
+      const previous = table.style.width;
+      table.style.width = "max-content";
+      const natural = table.getBoundingClientRect().width;
+      table.style.width = previous;
+      if (natural > limit) return "landscape";
+    }
+    for (const block of Array.from(probe.querySelectorAll<HTMLElement>(".katex-display"))) {
+      if (block.scrollWidth > limit) return "landscape";
+    }
+    return "portrait";
+  } finally {
+    probe.remove();
   }
 }
 
@@ -151,21 +210,27 @@ function ensurePrintHost(): HTMLElement {
   return host;
 }
 
-function setPrintHtml(source: string, html: string): void {
+function setPrintHtml(source: string, html: string, next: PrintPlan = plan): void {
   installPrintStyles();
   const host = ensurePrintHost();
   host.innerHTML = html;
   preparedSource = source;
 
   // 只有屏幕布局存在时才能测量；量完立刻恢复隐藏。
+  // 宽度必须按这一份版面的正文宽给，横向纸张的长代码 / 长表格才按同一列宽折行。
+  host.style.width = `${next.page.contentWidthMm}mm`;
   host.classList.add("wr-measure");
-  markSplittable(host);
+  markSplittable(host, next.page.contentHeightMm * PX_PER_MM);
   host.classList.remove("wr-measure");
+  host.style.width = "";
 }
 
 /** 只更新打印区，不弹出打印对话框（beforeprint 里用来兜底）。 */
 export function updatePrintView(source: string): void {
-  setPrintHtml(source, articleHtml(source));
+  const body = articleHtml(source);
+  const next = planFor(autoOrientation(body));
+  applyPlan(next);
+  setPrintHtml(source, body, next);
 }
 
 /** 打印区是否已经是这份文档（且带高亮）的内容。 */
@@ -176,14 +241,21 @@ export function isPrintPrepared(source: string): boolean {
 /** 提前把打印区渲染好（含高亮与 Mermaid），供浏览器菜单打印使用。 */
 export async function preparePrintView(source: string): Promise<void> {
   if (preparedSource === source) return;
-  setPrintHtml(source, await renderArticle(source));
+  const body = await renderArticle(source);
+  const next = planFor(autoOrientation(body));
+  applyPlan(next);
+  setPrintHtml(source, body, next);
 }
 
-/** 导出 PNG：按 A4 版面把打印区截成一张长图。 */
+/** 导出 PNG：按当前版面（自适应先定方向）把打印区截成一张长图。 */
 export async function exportPng(source: string, fileName: string): Promise<void> {
-  setPrintHtml(source, await renderArticle(source));
-  await downloadPng(fileName, ensurePrintHost());
+  const body = await renderArticle(source);
+  const next = planFor(autoOrientation(body));
+  applyPlan(next);
+  setPrintHtml(source, body, next);
+  await downloadPng(fileName, ensurePrintHost(), next.page.paperWidthMm);
 }
+
 
 /** 打印：先做代码高亮与 Mermaid 渲染再打印；用户取消打印对话框也不会留下脏状态。 */
 export async function printMarkdown(source: string): Promise<void> {
@@ -217,12 +289,18 @@ function buildDocument(
   extraCss = "",
   theme = themeCss(),
   dark = isDarkPalette(),
+  documentPlan: PrintPlan = plan,
 ): string {
   const safeTitle = escapeTitle(title);
   const backdrop = dark ? "#0b0b0b" : "#e9e5dc";
   // 屏幕上的「纸」也按当前栏宽画：栏宽比纸张窄时，纸跟着变窄，而不是留一圈空边。
-  const [topMm, rightMm, bottomMm, leftMm] = page.margins;
-  const sheetWidth = (layout.columnPx + (rightMm + leftMm) * PX_PER_MM).toFixed(1);
+  // 横向 / 自适应要能一眼看出纸有多宽，所以直接按纸张宽度铺。
+  const [topMm, rightMm, bottomMm, leftMm] = documentPlan.page.margins;
+  const sheetWidth = (
+    documentPlan.page.orientation === "landscape"
+      ? documentPlan.page.paperWidthMm * PX_PER_MM
+      : documentPlan.layout.columnPx + (rightMm + leftMm) * PX_PER_MM
+  ).toFixed(1);
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -235,7 +313,7 @@ ${PRINT_CSS}
 ${KATEX_CSS}
 ${customCss}
 ${extraCss}
-${pageCss}
+${documentPlan.css}
 /* 屏幕上按当前纸张与栏宽预览，打印时交还给 @page 的页边距 */
 html, body { margin: 0; padding: 0; background: ${backdrop}; }
 body { padding: 24px 12px; }
@@ -252,7 +330,7 @@ body { padding: 24px 12px; }
 </style>
 <script>
 (function () {
-  var LIMIT = ${(page.contentHeightMm * PX_PER_MM).toFixed(3)};
+  var LIMIT = ${(documentPlan.page.contentHeightMm * PX_PER_MM).toFixed(3)};
   function mark() {
     var blocks = document.querySelectorAll(".wr-doc pre, .wr-doc table, .wr-doc blockquote, .wr-doc figure, .wr-doc .wr-keep");
     for (var i = 0; i < blocks.length; i++) {
@@ -289,9 +367,10 @@ export async function exportableHtml(
 ): Promise<string> {
   const { css, dark } = exportTheme(style);
   const body = await renderArticle(source, dark);
+  const documentPlan = planFor(autoOrientation(body));
   // Pandoc 导出不需要内联 KaTeX 字体（会把 HTML 撑到 1.5MB 且毫无用处）。
   const fonts = options.inlineFonts === false ? "" : await katexFontOverrides();
-  return buildDocument(body, title, fonts, css, dark);
+  return buildDocument(body, title, fonts, css, dark, documentPlan);
 }
 
 export async function downloadHtml(
@@ -332,7 +411,7 @@ export function bodyDocumentHtml(
   extraCss = "",
 ): string {
   const { css, dark } = exportTheme(style);
-  return buildDocument(bodyHtml, title, extraCss, css, dark);
+  return buildDocument(bodyHtml, title, extraCss, css, dark, planFor(autoOrientation(bodyHtml)));
 }
 
 export interface ProjectSection {
@@ -389,5 +468,12 @@ export function projectDocumentHtml(options: {
   .wr-project-chapter + .wr-project-chapter { margin-top: 0; }
   ${options.chapterBreak ? ".wr-project-chapter + .wr-project-chapter { break-before: page; }" : ""}
 }`;
-  return buildDocument(`${toc}${sections}`, options.title, extraCss, css, dark);
+  return buildDocument(
+    `${toc}${sections}`,
+    options.title,
+    extraCss,
+    css,
+    dark,
+    planFor(autoOrientation(`${toc}${sections}`)),
+  );
 }

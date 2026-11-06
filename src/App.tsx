@@ -82,6 +82,7 @@ import { applyLineEnding, detectLineEnding, normalizeLineEndings } from "./io/li
 import { collectOutline } from "./markdown/outline";
 import { parseTableSize, TABLE_LIMITS } from "./markdown/table";
 import { exportPdf, exportHtmlAsPdf, previewPdf } from "./export/pdf";
+import type { PaperSize } from "./export/page";
 import { exportWithPandoc } from "./export/pandoc";
 import { SAMPLE_DOC } from "./sample";
 import { markSplashReady } from "./startup-splash";
@@ -93,6 +94,9 @@ import { formatLabel, isDefaultFormat } from "./io/encoding";
 import { setImageResolver } from "./io/image-resolver";
 import { setImageTarget } from "./editor/image-target";
 import { platform, isDesktop } from "./platform";
+import { normalizeOpenPath, DOCUMENT_EXT } from "./io/open-path";
+import { commitActiveCell } from "./editor/table-focus";
+import { breadcrumb } from "./logging/report";
 import type { WorkspaceAsset, WorkspaceFile, WorkspaceRoot } from "./platform/types";
 import { resolveRelativePath } from "./workspace/paths";
 import { BUILTIN_TEMPLATES, workspaceTemplates } from "./workspace/templates";
@@ -112,11 +116,41 @@ function dirnameOf(target: string): string {
   return index > 0 ? target.slice(0, index) : "";
 }
 
+/**
+ * 单元格浮层聚焦时仍然交给应用执行的快捷键命令。
+ *
+ * 它们不碰文字选区，所以可以先把格子内容提交再执行；复制 / 粘贴 / 撤销 /
+ * 行内格式都留给输入框自己处理（格式键见 `editor/table-cell-format.ts`）。
+ */
+const CELL_SAFE_COMMANDS = new Set([
+  "save",
+  "save-as",
+  "find",
+  "search",
+  "palette",
+  "settings",
+  "print",
+  "check-document",
+]);
+
 /** 判断路径是否在某个目录内（大小写不敏感，够用于「是否需要换根目录」）。 */
 function isInsideDir(root: string, target: string): boolean {
   const r = root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
   const t = target.replace(/\\/g, "/").toLowerCase();
   return t === r || t.startsWith(`${r}/`);
+}
+
+/** 只修一次「工作区被自动猜成文件父目录」的旧记录；修过之后尊重用户自己选的根。 */
+const WORKSPACE_PARENT_FIX_KEY = "writara:workspace-parent-fix-v1";
+
+function shouldRepairWorkspaceRoot(): boolean {
+  try {
+    if (localStorage.getItem(WORKSPACE_PARENT_FIX_KEY)) return false;
+    localStorage.setItem(WORKSPACE_PARENT_FIX_KEY, "1");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function App() {
@@ -1610,6 +1644,62 @@ export function App() {
     [workspace],
   );
 
+  /**
+   * 按路径打开：绕开原生对话框的「文件名」框。
+   *
+   * 从聊天 / 代码宿主复制来的 `E:/a/b.md`、带引号或零宽空格的路径，粘进
+   * Windows 的「文件名」框会报「文件名无效」。应用内输入框先把写法整理好，
+   * 再走「恢复授权 → 读取」这条已有通道。
+   */
+  const openByPath = useCallback(async () => {
+    const input = await askText({
+      title: "按路径打开",
+      label: "文件路径",
+      value: "",
+      placeholder: "E:\\笔记\\文档.md",
+      hint: "可以粘贴完整路径：/ 与 \\、引号、file:/// 地址都会自动整理；相对路径以当前文档或工作区为基准。",
+      confirmText: "打开",
+    });
+    if (!input) return;
+
+    const target = normalizeOpenPath(input, {
+      base: doc.ref && typeof doc.ref.native === "string" ? doc.ref.native : null,
+      root:
+        workspace.root && typeof workspace.root.native === "string"
+          ? workspace.root.native
+          : null,
+    });
+    if (!target) {
+      toast.error("请给出完整路径，例如 E:\\笔记\\文档.md");
+      return;
+    }
+    if (!DOCUMENT_EXT.test(target)) {
+      toast.error("只能打开 Markdown / 文本文件（.md / .markdown / .mdx / .txt）");
+      return;
+    }
+    if (!(await ensureSaved())) return;
+
+    const name = target.split(/[\\/]/).pop() || target;
+    try {
+      setFileError(null);
+      await withBusy(`正在打开「${name}」…`, async () => {
+        // 主进程只读用户授权过的路径：用 restore 通道登记刚输入的路径。
+        await platform().restoreAccess?.({ name: "", native: target });
+        const file = await platform().openPath?.(target);
+        if (!file) {
+          toast.error(`${name} 不存在或已被移动`);
+          return;
+        }
+        doc.openExternal(file.text, file.name, file.ref, null, file.format);
+        await yieldFrame();
+      });
+    } catch (cause) {
+      const reason = describeFileError(cause);
+      setFileError(reason);
+      toast.error(reason);
+    }
+  }, [askText, doc, ensureSaved, withBusy, workspace.root, yieldFrame]);
+
   useEffect(() => {
     let alive = true;
     const load = () => {
@@ -1728,9 +1818,12 @@ export function App() {
   /**
    * 打开文件后自动把它所在的目录作为工作区，文件树立即可用。
    * 文件本来就在当前工作区里时保持不动，不打断用户选好的根目录。
+   * 必须先等 `restoring` 结束：启动时文档会比工作区先恢复，抢跑会把
+   * 用户选好的高层级目录覆盖成文件父目录。
    */
-  const lastTreeDir = useRef<string | null>(null);  useEffect(() => {
-    if (!desktop) return;
+  const lastTreeDir = useRef<string | null>(null);
+  useEffect(() => {
+    if (!desktop || workspace.restoring) return;
 
     const native = doc.ref && typeof doc.ref.native === "string" ? doc.ref.native : null;
     if (!native) return;
@@ -1742,8 +1835,39 @@ export function App() {
     const dir = dirnameOf(native);
     if (!dir || lastTreeDir.current === dir) return;
     lastTreeDir.current = dir;
-    void workspace.openAt(dir);
-  }, [desktop, doc.ref, workspace]);
+    // 已有工作区时只为本次会话加载同级目录；没有工作区才把它记成根目录。
+    void workspace.openAt(dir, { persist: !workspace.root });
+  }, [desktop, doc.ref, workspace, workspace.restoring]);
+
+  /**
+   * 一次性修复旧版本留下的错误记录：以前打开文件会把「文件父目录」持久化成工作区根，
+   * 导致用户明确打开过的高层级目录在下次启动时丢失。只在当前根恰好等于文档父目录、
+   * 且最近文件夹里还有它的上层目录时修一次；之后尊重用户自己选择的根。
+   */
+  useEffect(() => {
+    if (!desktop || workspace.restoring || workspace.folders.length === 0) return;
+
+    const native = doc.ref && typeof doc.ref.native === "string" ? doc.ref.native : null;
+    const rootNative =
+      workspace.root && typeof workspace.root.native === "string" ? workspace.root.native : null;
+    if (!native || !rootNative) return;
+
+    const parent = dirnameOf(native);
+    if (!parent || !isInsideDir(rootNative, parent) || !isInsideDir(parent, rootNative)) return;
+
+    const ancestor = workspace.folders
+      .map((entry) => (typeof entry.root.native === "string" ? entry.root.native : ""))
+      .filter(
+        (path) =>
+          path.length > 0 &&
+          isInsideDir(path, rootNative) &&
+          !isInsideDir(rootNative, path) &&
+          isInsideDir(path, native),
+      )
+      .sort((a, b) => b.length - a.length)[0];
+    if (!ancestor || !shouldRepairWorkspaceRoot()) return;
+    void workspace.openAt(ancestor, { persist: true });
+  }, [desktop, doc.ref, workspace, workspace.restoring]);
 
   // Pandoc 探测：装了才启用 Word / ePub 导出；设置为空时把探测结果写回设置。
   useEffect(() => {
@@ -1806,7 +1930,7 @@ export function App() {
       editorRef.current?.setDoc(doc.text);
       const jump = pendingJump.current;
       pendingJump.current = null;
-      if (jump !== null) editorRef.current?.goTo(jump);
+      if (jump !== null) editorRef.current?.goTo(jump, { align: "center" });
     }
   }, [doc.loadToken]);
 
@@ -1874,6 +1998,7 @@ export function App() {
       sourceMode: modes.source,
       focusMode: modes.focus,
       typewriterMode: modes.typewriter,
+      paper: settings.paper,
       statusBar,
       style: settings.style,
       lineEnding: doc.lineEnding,
@@ -1897,6 +2022,7 @@ export function App() {
       isProject: workspace.isProject,
       chatOpen,
       updates: desktop,
+      desktop,
       templates: [
         ...BUILTIN_TEMPLATES.map((tpl) => ({ id: tpl.id, label: tpl.name })),
         ...workspaceTemplates(workspace.configFiles).map((tpl) => ({ id: tpl.id, label: tpl.name })),
@@ -1908,6 +2034,7 @@ export function App() {
       modes,
       statusBar,
       settings.style,
+      settings.paper,
       settings.spellcheck,
       settings.smartPunctuation,
       settings.customCss,
@@ -2197,6 +2324,8 @@ export function App() {
 
   const runCommand = useCallback(
     (id: string) => {
+      // 最近操作：卡死 / 崩溃时写进运行日志，回答「死之前最后做了什么」。
+      breadcrumb(id);
       // AI 命令：同一前缀，内部再分派（菜单 / 面板 / 右键共用）
       if (id.startsWith("ai-")) {
         ai.runCommand(id);
@@ -2254,6 +2383,15 @@ export function App() {
             if (!(await ensureSaved())) return;
             await withBusy("正在打开文件…", () => doc.open(openDialogDir()));
           })();
+          return;
+        case "open-path":
+          void openByPath();
+          return;
+        case "open-logs":
+          void window.writara?.logs.open();
+          return;
+        case "reload-ui":
+          window.location.reload();
           return;
         case "open-folder":
           void workspace.openFolder();
@@ -2559,6 +2697,12 @@ export function App() {
         return;
       }
 
+      if (id.startsWith("layout-")) {
+        const paper = id.slice("layout-".length) as PaperSize;
+        setSettings((current) => ({ ...current, paper }));
+        return;
+      }
+
       if (id === "custom-css-import") {
         importCustomCss();
         return;
@@ -2586,6 +2730,7 @@ export function App() {
       liveText,
       openFind,
       openDialogDir,
+      openByPath,
       openProjectAi,
       openRecent,
       openRecentByPath,
@@ -2777,13 +2922,22 @@ export function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;
       const target = event.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      const combo = comboFromEvent(event);
+      const id = SHORTCUTS[combo];
+
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) {
+        // 单元格浮层是表格唯一的输入位置：保存 / 查找这类不碰选区的命令仍然可用，
+        // 但必须先把格子内容写回文档，否则保存的是上一次提交的正文。
+        if (!target.classList.contains("cm-md-cell-editor") || !id || !CELL_SAFE_COMMANDS.has(id)) {
+          return;
+        }
+        commitActiveCell();
+      }
+
       if (document.querySelector("dialog[open]")) return;
 
-      const combo = comboFromEvent(event);
       if (EDITOR_NATIVE.has(combo)) return;
 
-      const id = SHORTCUTS[combo];
       if (!id) return;
 
       event.preventDefault();

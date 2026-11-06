@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EDITOR_STYLE_SPEC } from "../editor/theme";
 import { PRINT_CSS } from "../export/printStyles";
+import { resolvePage } from "../export/page";
 import { BULLETS } from "../editor/live-preview/bullet-widget";
 
 /**
@@ -68,6 +71,24 @@ describe("编辑器与打印样式一致", () => {
     );
   });
 
+  it("屏幕纸面按 A4 铺开，页边距与导出的 normal 一致", () => {
+    // 编辑区那片白底是「纸面」，不能再只按文字列宽铺：那样字直接贴纸边，看着像没有页边距。
+    // 纸面宽度取 --wr-page-width（A4），文字列居中落在纸上，差值就是左右页边距。
+    const scroller = editorRule(".cm-scroller");
+    expect(normalize(scroller["background-size"])).toContain("var(--wr-page-width)");
+    expect(normalize(scroller["background-position"])).toBe("center top");
+
+    // 屏幕上这三个数必须和导出的 A4 / normal 对齐，否则「预览 / 屏幕 / PDF」三张纸不一样大。
+    const page = resolvePage({ paper: "a4", margin: "normal" });
+    const tokens = readFileSync(resolve(process.cwd(), "src/styles/tokens.css"), "utf8");
+    expect(tokens).toContain(`--wr-page-pad: ${page.margins[3]}mm`);
+    expect(tokens).toContain("--wr-page-width: max(210mm");
+
+    // 打印预览的 .wr-sheet 与编辑区共用同一个边距 token。
+    const shell = readFileSync(resolve(process.cwd(), "src/styles/print-shell.css"), "utf8");
+    expect(shell).toMatch(/\.wr-sheet\s*\{[^}]*var\(--wr-page-pad/);
+  });
+
   it("标题阶梯相同", () => {
     for (const level of [1, 2, 3, 4, 5, 6]) {
       expect(normalize(editorRule(`.cm-md-heading-${level}`)["font-size"])).toBe(
@@ -95,6 +116,68 @@ describe("编辑器与打印样式一致", () => {
     expect(PRINT_CSS).toContain("--head-gap: var(--wr-heading-bottom");
   });
 
+  it("没有空行的标题也有相同的上间距", () => {
+    expect(normalize(editorRule(".cm-md-heading-tight.cm-md-heading-2")["padding-top"])).toBe(
+      normalize(printRule(".wr-doc h2.wr-tight")["margin-top"]),
+    );
+    expect(normalize(editorRule(".cm-md-heading-tight.cm-md-heading-3")["padding-top"])).toBe(
+      normalize(printRule(".wr-doc h3.wr-tight")["margin-top"]),
+    );
+    expect(normalize(editorRule(".cm-md-heading-tight.cm-md-heading-4")["padding-top"])).toBe(
+      normalize(printRule(".wr-doc h4.wr-tight")["margin-top"]),
+    );
+  });
+
+  it("列表的悬挂缩进与项间距一致", () => {
+    expect(normalize(editorRule(".cm-md-bullet")["width"])).toBe(
+      normalize(printRule(".wr-doc ul > li")["padding-left"]),
+    );
+    expect(normalize(editorRule(".cm-md-list-gap")["padding-top"])).toBe(
+      normalize(printRule(".wr-doc li + li")["margin-top"]),
+    );
+  });
+
+  it("列表整组离开正文左边距的缩进一致", () => {
+    // 圆点不悬在左边距外：编辑器把它加在行的 padding 上，打印加在 ul / ol 上。
+    expect(normalize(editorRule(".cm-md-list-line")["padding-left"])).toContain(
+      "calc(var(--wr-list-offset) + var(--wr-list-bullet-indent)",
+    );
+    expect(normalize(editorRule(".cm-md-list-line")["text-indent"])).toBe(
+      "calc(-1 * var(--wr-list-bullet-indent))",
+    );
+    expect(normalize(printRule(".wr-doc ul")["padding-left"])).toBe("var(--wr-list-offset)");
+    expect(normalize(editorRule(".cm-md-list-ordered")["padding-left"])).toContain(
+      "calc(var(--wr-list-offset) + var(--wr-list-indent)",
+    );
+    expect(normalize(printRule(".wr-doc ol")["padding-left"])).toBe(
+      "calc(var(--wr-list-offset) + var(--wr-list-indent))",
+    );
+    // 行上的 text-indent 会被 inline-block 继承进自己的内部，圆点/数字会画到方框外。
+    // 打印端没有 text-indent，所以这三个 widget 必须清零，否则「编辑器里的圆点悬在左边」。
+    for (const widget of [".cm-md-bullet", ".cm-md-number", ".cm-md-task"]) {
+      expect(normalize(editorRule(widget)["text-indent"])).toBe("0");
+    }
+  });
+
+  it("表格的内边距、底色与边框一致", () => {
+    const editor = editorRule(".cm-md-table th, .cm-md-table td");
+    const print = printRule(".wr-doc td");
+    expect(normalize(editor["padding"])).toBe(normalize(print["padding"]));
+    expect(normalize(editor["border"])).toBe(normalize(print["border"]));
+    // 单元格内容默认垂直居中（多行单元格与空单元格看起来才不悬在顶部）
+    expect(normalize(editor["vertical-align"])).toBe("middle");
+    expect(normalize(print["vertical-align"])).toBe("middle");
+    expect(normalize(editorRule(".cm-md-table th")["background"])).toBe(
+      normalize(printRule(".wr-doc th")["background"]),
+    );
+  });
+
+  it("引用块的左边框一致", () => {
+    expect(normalize(editorRule(".cm-md-quote")["border-left"])).toBe(
+      normalize(printRule(".wr-doc blockquote")["border-left"]),
+    );
+  });
+
   it("高亮只有底色，底色与内边距一致", () => {
     const editor = editorRule(".cm-md-mark");
     const print = printRule(".wr-doc mark");
@@ -110,6 +193,11 @@ describe("编辑器与打印样式一致", () => {
     expect(normalize(editor["color"])).toBe(normalize(print["color"]));
     expect(normalize(editor["text-decoration"])).toBe("underline");
     expect(normalize(print["text-decoration"])).toBe("underline");
+  });
+
+  it("加粗统一 600，不要回到 700", () => {
+    expect(normalize(editorRule(".cm-md-strong")["font-weight"])).toBe("600");
+    expect(normalize(printRule(".wr-doc strong")["font-weight"])).toBe("600");
   });
 
   it("行内代码的字号、内边距、圆角一致", () => {

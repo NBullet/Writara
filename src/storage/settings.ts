@@ -47,6 +47,7 @@ export interface AiMemoryItem {
   createdAt: number;
 }
 
+import { applyPagePreview } from "../export/page";
 import type { MarginPreset, PaperSize } from "../export/page";
 import type { LineEnding } from "../io/line-endings";
 
@@ -308,7 +309,10 @@ export function normalizeSettings(input: Partial<Settings> | null | undefined): 
       LIMITS.autosaveDelay.min,
       LIMITS.autosaveDelay.max,
     ),
-    paper: input?.paper === "letter" ? "letter" : "a4",
+    paper:
+      input?.paper === "letter" || input?.paper === "a4-landscape" || input?.paper === "auto"
+        ? input.paper
+        : "a4",
     margin:
       input?.margin === "narrow" || input?.margin === "wide" || input?.margin === "normal"
         ? input.margin
@@ -431,6 +435,8 @@ export function applySettings(settings: Settings, root: HTMLElement = document.d
   root.dataset.style = settings.style;
   root.style.setProperty("--wr-font-size", `${settings.fontSize}px`);
   root.style.setProperty("--wr-measure", `${settings.measure}rem`);
+  // 纸面宽度 / 页边距跟着版面预设走：A4 横向更宽，自适应直接铺满窗口。
+  applyPagePreview({ paper: settings.paper, margin: settings.margin }, root);
   applyCustomCss(settings.customCss);
 }
 

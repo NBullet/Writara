@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { installRuntimeLogging } from "./logging/report";
 import { installPrintStyles, setCustomCss } from "./export/print";
 import { runStartupSplash } from "./startup-splash";
 import { setPlatform } from "./platform";
@@ -21,6 +23,9 @@ if (!container) throw new Error("#root 未找到");
 // 先选平台实现，再渲染：App 里的菜单栏、关窗拦截都按 platform().kind 分支。
 if (hasDesktopBridge()) setPlatform(createDesktopFs());
 
+// 日志 / 心跳 / 紧急重载必须在 React 之前装好：React 崩掉时它们还要能用。
+installRuntimeLogging();
+
 // 先应用设置再渲染，避免主题闪一下。
 const initialSettings = loadSettings();
 applySettings(initialSettings);
@@ -32,7 +37,9 @@ const printMode = new URLSearchParams(window.location.search).has("print");
 if (printMode) document.getElementById("wr-splash")?.remove();
 
 createRoot(container).render(
-  <StrictMode>{printMode ? <PrintPreview /> : <App />}</StrictMode>,
+  <StrictMode>
+    <ErrorBoundary>{printMode ? <PrintPreview /> : <App />}</ErrorBoundary>
+  </StrictMode>,
 );
 
 // 启动过渡页：Vite 加载前由 index.html 显示静态结构，这里接管进度与收尾。

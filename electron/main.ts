@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeTheme, protocol, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, shell } from "electron";
 import { promises as fs } from "node:fs";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { allowExternalFile, assertAllowedPath, registerFileIpc } from "./ipc-fs";
+import { initLog, log, logDir, logError, logFile } from "./app-log";
 import { registerAiIpc } from "./ai-agent";
 import { buildApplicationMenu, DEFAULT_MENU_STATE } from "./menu";
 import { exportPdf, previewPdf } from "./pdf";
@@ -92,6 +93,35 @@ app.setName("Writara");
 // Windows 任务栏归属与「最近使用」需要它。
 app.setAppUserModelId("com.writara.desktop");
 
+// 运行日志：界面白屏 / 卡死时唯一的线索，见 `app-log.ts`。
+initLog();
+
+process.on("uncaughtException", (error) => {
+  logError("main", error);
+  // 不拦截退出：Electron 默认会弹错误框，日志先落盘即可。
+});
+
+process.on("unhandledRejection", (reason) => {
+  logError("main:promise", reason);
+});
+
+app.on("child-process-gone", (_event, details) => {
+  log(
+    "main",
+    `子进程退出 type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`,
+  );
+  // GPU 进程崩溃后渲染进程还活着（心跳正常），但合成器可能再也画不出东西：
+  // 窗口整片纯白、菜单可用——和「卡死」看起来一样。给一次重载入口。
+  const crashed =
+    details.reason === "crashed" || details.reason === "oom" || details.reason === "abnormal-exit";
+  if (details.type === "GPU" && crashed) promptGpuCrash();
+});
+
+app.on("before-quit", () => {
+  quitting = true;
+  log("main", "退出");
+});
+
 /**
  * GPU 沙箱的自动降级。
  *
@@ -160,6 +190,96 @@ function applyMenu(): void {
   Menu.setApplicationMenu(buildApplicationMenu(menuState, sendCommand));
 }
 
+/** 退出过程中子进程被杀是正常的，不要弹「崩溃 / 卡死」。 */
+let quitting = false;
+
+/** 渲染进程心跳与最近操作：用来判断「界面卡死」并给日志补上下文。 */
+const lastBeat = new Map<number, number>();
+const lastActions = new Map<number, string[]>();
+const hangPrompted = new Set<number>();
+let hangTimer: NodeJS.Timeout | null = null;
+
+/** 15 秒没有心跳就认为界面卡住了（只在窗口可见且聚焦时判断，后台节流不算）。 */
+const HANG_AFTER_MS = 15_000;
+
+function recentActions(contentsId: number): string {
+  const list = lastActions.get(contentsId) ?? [];
+  return list.length > 0 ? list.join(" → ") : "（无）";
+}
+
+/** 卡死提示：日志先落盘，再让用户决定是否重新加载。 */
+function promptHang(win: BrowserWindow, reason: string): void {
+  const id = win.webContents.id;
+  if (quitting || hangPrompted.has(id) || win.isDestroyed()) return;
+  hangPrompted.add(id);
+  log(`renderer:${id}`, `判定界面卡死：${reason}`);
+  log(`renderer:${id}`, `最近操作：${recentActions(id)}`);
+  log(`renderer:${id}`, `标题：${win.getTitle()}`);
+
+  void dialog
+    .showMessageBox(win, {
+      type: "warning",
+      title: "界面没有响应",
+      message: "Writara 的界面卡住了，已经 15 秒没有响应。",
+      detail: `最近的操作：${recentActions(id)}\n\n日志：${logFile()}\n重新加载会从草稿恢复当前文档。`,
+      buttons: ["重新加载", "继续等待"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    })
+    .then(({ response }) => {
+      if (response !== 0 || win.isDestroyed()) return;
+      log(`renderer:${id}`, "用户选择重新加载");
+      win.webContents.reload();
+    });
+}
+
+function startHangWatchdog(): void {
+  if (hangTimer) return;
+  hangTimer = setInterval(() => {
+    const now = Date.now();
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed() || !win.isVisible() || win.isMinimized() || !win.isFocused()) continue;
+      const id = win.webContents.id;
+      const beat = lastBeat.get(id);
+      // 还没收到第一次心跳（页面仍在加载）时不做判断。
+      if (beat === undefined || now - beat < HANG_AFTER_MS) continue;
+      promptHang(win, `心跳停了 ${Math.round((now - beat) / 1000)} 秒`);
+      break;
+    }
+  }, 5000);
+  hangTimer.unref?.();
+}
+
+/** GPU 崩溃只提示一次：Chromium 有时会自己恢复，反复弹框反而吵。 */
+let gpuCrashPrompted = false;
+
+function promptGpuCrash(): void {
+  if (gpuCrashPrompted || quitting) return;
+  const win =
+    BrowserWindow.getFocusedWindow() ??
+    BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
+  if (!win || win.isDestroyed()) return;
+  gpuCrashPrompted = true;
+  log("main", `提示用户重新加载（GPU 崩溃），日志：${logFile()}`);
+  void dialog
+    .showMessageBox(win, {
+      type: "warning",
+      title: "显示进程崩溃",
+      message: "Writara 的显示进程（GPU）崩溃了，窗口可能已经变成空白。",
+      detail: `文档与草稿都没有受影响。\n\n日志：${logFile()}`,
+      buttons: ["重新加载界面", "继续等待"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    })
+    .then(({ response }) => {
+      if (response !== 0 || win.isDestroyed()) return;
+      log("main", "GPU 崩溃后重新加载窗口");
+      win.webContents.reload();
+    });
+}
+
 function createWindow(state: WindowState = windowState): BrowserWindow {
   const win = new BrowserWindow({
     width: state.width,
@@ -209,15 +329,36 @@ function createWindow(state: WindowState = windowState): BrowserWindow {
     const elapsed = Date.now() - windowStartedAt;
     markStartup(`dom-ready(${elapsed}ms)`);
   });
-  win.webContents.on("preload-error", (_event, preloadPath) =>
-    console.error("[startup] preload failed", preloadPath),
-  );
+  win.webContents.on("preload-error", (_event, preloadPath) => {
+    console.error("[startup] preload failed", preloadPath);
+    log(`renderer:${contentsId}`, `preload 加载失败 ${preloadPath}`);
+  });
   win.webContents.on("did-finish-load", () => {
     markStartup("did-finish-load");
     flushStartupLog();
+    // 页面就绪即视为活着；之后靠渲染进程的 heartbeat 判断是否卡住。
+    lastBeat.set(contentsId, Date.now());
+    hangPrompted.delete(contentsId);
+    log(`renderer:${contentsId}`, `页面加载完成 ${win.webContents.getURL()}`);
   });
   win.webContents.on("did-fail-load", (_event, code, description, url) => {
     console.error(`[startup] load failed ${code} ${description} ${url}`);
+    log(`renderer:${contentsId}`, `页面加载失败 ${code} ${description} ${url}`);
+  });
+  // 渲染进程的 console.warn / error 也进日志（白屏前通常先有一条报错）。
+  win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level < 2) return;
+    log(
+      `console:${contentsId}`,
+      `${level === 3 ? "error" : "warn"} ${message} (${sourceId}:${line})`,
+    );
+  });
+  win.webContents.on("unresponsive", () => {
+    log(`renderer:${contentsId}`, "Chromium 报告 unresponsive");
+    promptHang(win, "Chromium 报告 unresponsive");
+  });
+  win.webContents.on("responsive", () => {
+    log(`renderer:${contentsId}`, "界面恢复响应");
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -231,9 +372,34 @@ function createWindow(state: WindowState = windowState): BrowserWindow {
     openExternal(url);
   });
 
-  win.webContents.on("render-process-gone", () => {
-    closeAllowed.add(contentsId);
-    win.destroy();
+  win.webContents.on("render-process-gone", (_event, details) => {
+    log(
+      `renderer:${contentsId}`,
+      `渲染进程退出 reason=${details.reason} exitCode=${details.exitCode}（最近操作：${recentActions(contentsId)}）`,
+    );
+    if (details.reason === "clean-exit" || win.isDestroyed() || quitting) return;
+    // 不直接销毁窗口：OOM / 显卡驱动导致的崩溃还能重载回来（草稿会恢复）。
+    void dialog
+      .showMessageBox(win, {
+        type: "error",
+        title: "界面进程崩溃",
+        message: "Writara 的界面进程崩溃了。",
+        detail: `原因：${details.reason}（退出码 ${details.exitCode}）\n最近的操作：${recentActions(contentsId)}\n\n日志：${logFile()}\n重新加载会从草稿恢复当前文档。`,
+        buttons: ["重新加载", "关闭窗口"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      })
+      .then(({ response }) => {
+        if (win.isDestroyed()) return;
+        if (response === 0) {
+          log(`renderer:${contentsId}`, "崩溃后选择重新加载");
+          win.webContents.reload();
+          return;
+        }
+        closeAllowed.add(contentsId);
+        win.destroy();
+      });
   });
 
   // 有未保存修改时先问渲染进程；它确认后才真正关。
@@ -326,6 +492,40 @@ function registerAppIpc(): void {
   ipcMain.on("app:dirty", (event, value: boolean) => {
     dirtyByContents.set(event.sender.id, Boolean(value));
   });
+
+  // 渲染进程心跳：超时没有心跳 → 界面卡死，见 `promptHang()`。
+  ipcMain.on("app:heartbeat", (event) => {
+    if (!lastBeat.has(event.sender.id)) {
+      log(`renderer:${event.sender.id}`, "界面心跳已建立（卡死检测生效）");
+    }
+    lastBeat.set(event.sender.id, Date.now());
+    hangPrompted.delete(event.sender.id);
+  });
+
+  // 渲染进程主动上报的错误（window.onerror / 未处理的 Promise / ErrorBoundary）。
+  ipcMain.on(
+    "app:log",
+    (
+      event,
+      entry: { level?: string; scope?: string; message?: string; stack?: string } | undefined,
+    ) => {
+      const scope = `renderer:${event.sender.id}${entry?.scope ? `/${entry.scope}` : ""}`;
+      const stack = entry?.stack ? `\n${entry.stack}` : "";
+      log(scope, `${entry?.level ?? "error"} ${entry?.message ?? ""}${stack}`);
+    },
+  );
+
+  // 最近操作：卡死 / 崩溃时写进日志，回答「死之前最后做了什么」。
+  ipcMain.on("app:breadcrumb", (event, label: unknown) => {
+    const id = event.sender.id;
+    const list = lastActions.get(id) ?? [];
+    list.push(`${new Date().toISOString().slice(11, 19)} ${String(label)}`);
+    while (list.length > 12) list.shift();
+    lastActions.set(id, list);
+    log(`action:${id}`, String(label));
+  });
+
+  ipcMain.handle("app:open-logs", () => shell.openPath(logDir()));
 
   ipcMain.on("app:shell-ready", (event) => {
     shellReadyContents.add(event.sender.id);
@@ -477,6 +677,8 @@ if (!gotLock) {
     applyMenu();
     markStartup("menu-done");
     startUpdater();
+    startHangWatchdog();
+    log("main", "窗口与 IPC 就绪");
 
     const initial = fileFromArgv(process.argv);
     if (initial) openFileInWindow(initial);
